@@ -51,6 +51,7 @@
         var autoDriverTimer = null;
         var autoDriverWaypoints = null;      /* remaining waypoints, excluding the start */
         var autoDriverWaypointIdx = 0;
+        var autoDriverCurrentLegStart = null; /* the point the current leg (waypoints[waypointIdx-1] or the run's own start) began from - needed to know whether the fleet is still in the 45-degree diagonal portion of this leg or past the bend, in the straight portion, for a correct retreat direction */
         var autoDriverShipAcPositions = null;
         var lastAutoDriverObstacles = [];
         var autoDriverDisplayPath = null; /* path currently shown on the map; redrawn every tick until cleared */
@@ -71,6 +72,7 @@
             }
             autoDriverWaypoints = null;
             autoDriverWaypointIdx = 0;
+            autoDriverCurrentLegStart = null;
             autoDriverShipAcPositions = null;
             autoDriverDisplayPath = null;
             autoDriverDisplayProblems = [];
@@ -608,6 +610,10 @@
             autoDriverShipAcPositions = snapshot.shipAcPositions;
             autoDriverDisplayPath = snapshot.displayPath;
             autoDriverAcceptedProblems = snapshot.acceptedProblems || [];
+            /* the fleet begins a fresh leg from wherever it actually is right now (post-stop),
+               not from wherever it was heading from before the interruption */
+            var resumeShip = GAME_DATA.shipByPos[autoDriverShipAcPositions[0]];
+            autoDriverCurrentLegStart = resumeShip ? { x: resumeShip.x, y: resumeShip.y } : autoDriverWaypoints[autoDriverWaypointIdx];
             autoDriverIssueMove(autoDriverWaypoints[autoDriverWaypointIdx]);
             autoDriverLastSyncTime = Date.now();
             autoDriverTimer = setInterval(checkAutoDriverProgress, 1000);
@@ -623,6 +629,7 @@
            whole path), matching plain Taxi Driver's existing behavior. */
         function executeAutoDriver(path, knownProblems, segmentEndpoints) {
             clearAutoDriver();
+            autoDriverCurrentLegStart = path[0];
             autoDriverWaypoints = path.slice(1); /* exclude start A */
             autoDriverWaypointIdx = 0;
             autoDriverShipAcPositions = getSelectedShipAcPositions();
@@ -732,6 +739,7 @@
             var originalSegmentEndpoints = autoDriverSegmentEndpoints;
             var shipAcPositions = autoDriverShipAcPositions;
             var currentTarget = autoDriverWaypoints[autoDriverWaypointIdx];
+            var legStart = autoDriverCurrentLegStart; /* captured before clearAutoDriver wipes it below */
 
             /* stop the fleet right where it is, same mechanism as the manual End-key stop */
             acwLocal.shipSelect(0);
@@ -743,12 +751,43 @@
             autoDriverShipAcPositions = shipAcPositions; /* clearAutoDriver wiped this - restore for the retreat below */
             var myGeneration = autoDriverGeneration;
 
-            /* retreat 12 units back the way it came, away from the waypoint it was heading to */
-            var dx = currentPos.x - currentTarget.x, dy = currentPos.y - currentTarget.y;
-            var len = Math.sqrt(dx * dx + dy * dy);
-            var retreatPoint = (len < 0.01)
-                ? currentPos
-                : { x: currentPos.x + (dx / len) * 12, y: currentPos.y + (dy / len) * 12 };
+            /* Retreat 12 units back the way it came. The game flies each leg diagonally (45
+               degrees) until one axis lines up, then straight the rest of the way (see
+               computeBendPoint) - it does NOT fly a straight line from wherever it currently is
+               toward the target. So retreating "away from the target" in a straight line is only
+               correct once the fleet is past the bend; while still in the diagonal portion, that
+               vector points in the wrong direction entirely. Determine which portion the fleet is
+               actually in and retreat along that portion's real direction instead. */
+            var retreatPoint = currentPos;
+            if (legStart) {
+                var legDx = currentTarget.x - legStart.x, legDy = currentTarget.y - legStart.y;
+                var diagLen = Math.min(Math.abs(legDx), Math.abs(legDy));
+                var sx = legDx > 0 ? 1 : (legDx < 0 ? -1 : 0);
+                var sy = legDy > 0 ? 1 : (legDy < 0 ? -1 : 0);
+                var traveledShort = Math.min(Math.abs(currentPos.x - legStart.x), Math.abs(currentPos.y - legStart.y));
+                var stillDiagonal = traveledShort < diagLen - 0.01;
+                var dirX, dirY;
+                if (stillDiagonal || diagLen === 0) {
+                    /* still on (or the whole leg is) the 45-degree diagonal - retreat straight back along it */
+                    dirX = -sx; dirY = -sy;
+                } else if (Math.abs(legDx) > Math.abs(legDy)) {
+                    /* past the bend, moving straight along x only */
+                    dirX = -sx; dirY = 0;
+                } else {
+                    /* past the bend, moving straight along y only */
+                    dirX = 0; dirY = -sy;
+                }
+                var dirLen = Math.sqrt(dirX * dirX + dirY * dirY);
+                if (dirLen >= 0.01) {
+                    retreatPoint = { x: currentPos.x + (dirX / dirLen) * 12, y: currentPos.y + (dirY / dirLen) * 12 };
+                }
+            } else {
+                /* no leg-start on record (shouldn't normally happen) - fall back to the old
+                   straight-line-to-target approximation rather than not retreating at all */
+                var dx = currentPos.x - currentTarget.x, dy = currentPos.y - currentTarget.y;
+                var len = Math.sqrt(dx * dx + dy * dy);
+                if (len >= 0.01) retreatPoint = { x: currentPos.x + (dx / len) * 12, y: currentPos.y + (dy / len) * 12 };
+            }
 
             autoDriverThinking = true;
             redraw();
@@ -949,6 +988,7 @@
                 return;
             }
             var next = autoDriverWaypoints[autoDriverWaypointIdx];
+            autoDriverCurrentLegStart = target; /* the point just reached is where the next leg begins */
             autoDriverIssueMove(next);
         }
         /* -------------- end Auto Driver -------------- */
