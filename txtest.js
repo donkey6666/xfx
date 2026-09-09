@@ -12,32 +12,32 @@
            events, which our waypoint moves never generate, so we call it directly instead.
            The exact accessor isn't visible from this popup file, so this tries the most
            likely candidates and logs which one (if any) actually worked. */
-        var mainWindowJumpCandidates = [
+        var txdJumpCandidates = [
             { label: 'acwLocal.jumpto', fn: function(x, y) { acwLocal.jumpto(x, y); } },
             { label: 'acw.jumpto', fn: function(x, y) { acw.jumpto(x, y); } },
             { label: 'acw.jumptoA', fn: function(x, y) { acw.jumptoA(x, y); } },
             { label: 'window.opener.jumptoA', fn: function(x, y) { window.opener.jumptoA(x, y); } }
         ];
-        var mainWindowJumpWorkingIdx = -1; /* index into mainWindowJumpCandidates once one is confirmed working */
-        var autoDriverJumpStatus = ''; /* drawn on-screen so it's visible without console access */
-        function jumpMainWindowTo(mapX, mapY) {
-            if (mainWindowJumpWorkingIdx >= 0) {
+        var txdJumpWorkingIdx = -1; /* index into txdJumpCandidates once one is confirmed working */
+        var txdJumpStatus = ''; /* drawn on-screen so it's visible without console access */
+        function txdJumpMainWindow(mapX, mapY) {
+            if (txdJumpWorkingIdx >= 0) {
                 try {
-                    mainWindowJumpCandidates[mainWindowJumpWorkingIdx].fn(mapX, mapY);
-                    autoDriverJumpStatus = 'main window jump: OK via ' + mainWindowJumpCandidates[mainWindowJumpWorkingIdx].label;
+                    txdJumpCandidates[txdJumpWorkingIdx].fn(mapX, mapY);
+                    txdJumpStatus = 'main window jump: OK via ' + txdJumpCandidates[txdJumpWorkingIdx].label;
                     return;
-                } catch (e) { mainWindowJumpWorkingIdx = -1; }
+                } catch (e) { txdJumpWorkingIdx = -1; }
             }
-            for (var i = 0; i < mainWindowJumpCandidates.length; i++) {
+            for (var i = 0; i < txdJumpCandidates.length; i++) {
                 try {
-                    mainWindowJumpCandidates[i].fn(mapX, mapY);
-                    mainWindowJumpWorkingIdx = i;
-                    autoDriverJumpStatus = 'main window jump: OK via ' + mainWindowJumpCandidates[i].label;
-                    console.log('Auto driver: main window jump working via ' + mainWindowJumpCandidates[i].label);
+                    txdJumpCandidates[i].fn(mapX, mapY);
+                    txdJumpWorkingIdx = i;
+                    txdJumpStatus = 'main window jump: OK via ' + txdJumpCandidates[i].label;
+                    console.log('Auto driver: main window jump working via ' + txdJumpCandidates[i].label);
                     return;
                 } catch (e) { /* try next candidate */ }
             }
-            autoDriverJumpStatus = 'main window jump: FAILED - no working jumptoA() found';
+            txdJumpStatus = 'main window jump: FAILED - no working jumptoA() found';
             console.log('Auto driver: could not find a working jumptoA() to move the main browser window. Popup view was still centered.');
         }
 
@@ -49,11 +49,11 @@
            cancels the in-progress sequence (see mouseup handler). */
 
         var autoDriverTimer = null;
-        var autoDriverWaypoints = null;      /* remaining waypoints, excluding the start */
-        var autoDriverWaypointIdx = 0;
-        var autoDriverCurrentLegStart = null; /* the point the current leg (waypoints[waypointIdx-1] or the run's own start) began from - needed to know whether the fleet is still in the 45-degree diagonal portion of this leg or past the bend, in the straight portion, for a correct retreat direction */
-        var autoDriverShipAcPositions = null;
-        var lastAutoDriverObstacles = [];
+        var txdWaypoints = null;      /* remaining waypoints, excluding the start */
+        var txdWaypointIdx = 0;
+        var txdLegStart = null; /* the point the current leg (waypoints[waypointIdx-1] or the run's own start) began from - needed to know whether the fleet is still in the 45-degree diagonal portion of this leg or past the bend, in the straight portion, for a correct retreat direction */
+        var txdShipAcPositions = null;
+        var txdLastObstacles = [];
         var autoDriverDisplayPath = null; /* path currently shown on the map; redrawn every tick until cleared */
         var autoDriverThinking = false; /* shows a "Thinking..." message while computeAutoDriverPath runs */
         var autoDriverDisplayProblems = [];
@@ -70,20 +70,20 @@
                 clearInterval(autoDriverTimer);
                 autoDriverTimer = null;
             }
-            autoDriverWaypoints = null;
-            autoDriverWaypointIdx = 0;
-            autoDriverCurrentLegStart = null;
-            autoDriverShipAcPositions = null;
+            txdWaypoints = null;
+            txdWaypointIdx = 0;
+            txdLegStart = null;
+            txdShipAcPositions = null;
             autoDriverDisplayPath = null;
             autoDriverDisplayProblems = [];
-            autoDriverLastSyncTime = 0;
-            autoDriverAcceptedProblems = [];
-            autoDriverSegmentEndpoints = [];
-            autoDriverGeneration++; /* invalidates any in-flight background recompute from before this clear */
-            dismissTaxiPanel(); /* any pending decision is moot once the run it belonged to is cleared */
+            txdLastSyncTime = 0;
+            txdAcceptedProblems = [];
+            txdSegmentEndpoints = [];
+            txdGeneration++; /* invalidates any in-flight background recompute from before this clear */
+            txDismissPanel(); /* any pending decision is moot once the run it belonged to is cleared */
         }
 
-        function getForeignBaseObstacles() {
+        function txGetBaseObstacles() {
             return GAME_DATA.bases
                 .filter(function(b) { return !acwLocal.isMyAlli(b.alliName); })
                 .map(function(b) {
@@ -92,12 +92,12 @@
                 });
         }
 
-        var FOREIGN_SHIP_SAFE_DISTANCE = 12; /* fixed raster units - ships don't have a firing-range value like bases */
-        function getForeignShipObstacles() {
+        var TX_SHIP_SAFE_DIST = 12; /* fixed raster units - ships don't have a firing-range value like bases */
+        function txGetShipObstacles() {
             return GAME_DATA.ships
                 .filter(function(s) { return !acwLocal.isMyAlli(s.alliName); })
                 .map(function(s) {
-                    var r = FOREIGN_SHIP_SAFE_DISTANCE;
+                    var r = TX_SHIP_SAFE_DIST;
                     return { minX: s.x - r, maxX: s.x + r, minY: s.y - r, maxY: s.y + r };
                 });
         }
@@ -112,10 +112,10 @@
         var autoDriverKnownStealthObstacles = [];
 
         function getAllForeignObstacles() {
-            return getForeignBaseObstacles().concat(getForeignShipObstacles()).concat(autoDriverKnownStealthObstacles);
+            return txGetBaseObstacles().concat(txGetShipObstacles()).concat(autoDriverKnownStealthObstacles);
         }
 
-        function pointInsideAnyObstacle(p, obstacles) {
+        function txPointInside(p, obstacles) {
             for (var i = 0; i < obstacles.length; i++) {
                 var o = obstacles[i];
                 if (p.x > o.minX && p.x < o.maxX && p.y > o.minY && p.y < o.maxY) return true;
@@ -123,7 +123,7 @@
             return false;
         }
 
-        function segmentIntersectsObstacle(p1, p2, box) {
+        function txSegmentIntersects(p1, p2, box) {
             var dx = p2.x - p1.x, dy = p2.y - p1.y;
             var tmin = 0, tmax = 1, t1, t2, tmp;
             if (dx === 0) {
@@ -149,9 +149,9 @@
             return tmin < tmax && tmax > 0 && tmin < 1;
         }
 
-        function segmentClearOfObstacles(p1, p2, obstacles) {
+        function txSegmentClear(p1, p2, obstacles) {
             for (var i = 0; i < obstacles.length; i++) {
-                if (segmentIntersectsObstacle(p1, p2, obstacles[i])) return false;
+                if (txSegmentIntersects(p1, p2, obstacles[i])) return false;
             }
             return true;
         }
@@ -179,24 +179,24 @@
            extends beyond the currently visible area before deciding. This shows a small corner
            panel instead - the map underneath stays fully interactive.
            Only one panel exists at a time; showing a new one dismisses whatever was pending. */
-        var activeTaxiPanel = null;
-        var activeTaxiPanelCleanup = null; /* removes the current panel's document-level drag listeners */
+        var txPanel = null;
+        var txPanelCleanup = null; /* removes the current panel's document-level drag listeners */
 
-        function dismissTaxiPanel() {
-            if (activeTaxiPanel) {
-                if (activeTaxiPanelCleanup) {
-                    activeTaxiPanelCleanup();
-                    activeTaxiPanelCleanup = null;
+        function txDismissPanel() {
+            if (txPanel) {
+                if (txPanelCleanup) {
+                    txPanelCleanup();
+                    txPanelCleanup = null;
                 }
-                activeTaxiPanel.remove();
-                activeTaxiPanel = null;
+                txPanel.remove();
+                txPanel = null;
             }
         }
 
         /* buttons: array of { label, onClick }. Clicking any button dismisses the panel first,
            then runs its callback. */
         function showTaxiConfirmPanel(message, buttons) {
-            dismissTaxiPanel();
+            txDismissPanel();
             var panel = document.createElement('div');
             panel.className = 'taxiConfirmPanel';
 
@@ -213,20 +213,20 @@
                 var btn = document.createElement('button');
                 btn.textContent = b.label;
                 btn.onclick = function() {
-                    dismissTaxiPanel();
+                    txDismissPanel();
                     b.onClick();
                 };
                 panel.appendChild(btn);
             });
             document.body.appendChild(panel);
-            activeTaxiPanel = panel;
-            makeTaxiPanelDraggable(panel, header);
+            txPanel = panel;
+            txMakePanelDraggable(panel, header);
         }
 
         /* Drag-to-move via the header bar. Switches from the default bottom/right anchoring to
            explicit left/top on first drag, so the panel can be positioned anywhere - e.g. out
            of the way of a path that extends into the corner it normally opens in. */
-        function makeTaxiPanelDraggable(panel, handle) {
+        function txMakePanelDraggable(panel, handle) {
             var dragging = false, startX, startY, startLeft, startTop;
             function onDown(e) {
                 dragging = true;
@@ -252,14 +252,14 @@
             handle.addEventListener('mousedown', onDown);
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
-            activeTaxiPanelCleanup = function() {
+            txPanelCleanup = function() {
                 handle.removeEventListener('mousedown', onDown);
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
             };
         }
 
-        function computeBendPoint(p1, p2) {
+        function txComputeBend(p1, p2) {
             var dx = p2.x - p1.x, dy = p2.y - p1.y;
             var d = Math.min(Math.abs(dx), Math.abs(dy));
             var sx = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
@@ -267,17 +267,17 @@
             return { x: p1.x + sx * d, y: p1.y + sy * d };
         }
 
-        function moveClearOfObstacles(p1, p2, obstacles) {
-            var m = computeBendPoint(p1, p2);
-            return segmentClearOfObstacles(p1, m, obstacles) && segmentClearOfObstacles(m, p2, obstacles);
+        function txMoveClear(p1, p2, obstacles) {
+            var m = txComputeBend(p1, p2);
+            return txSegmentClear(p1, m, obstacles) && txSegmentClear(m, p2, obstacles);
         }
 
         /* How many distinct obstacles a move from p1 to p2 actually crosses (0 if fully clear). */
-        function countObstaclesHit(p1, p2, obstacles) {
-            var m = computeBendPoint(p1, p2);
+        function txCountObstaclesHit(p1, p2, obstacles) {
+            var m = txComputeBend(p1, p2);
             var hit = 0;
             for (var i = 0; i < obstacles.length; i++) {
-                if (segmentIntersectsObstacle(p1, m, obstacles[i]) || segmentIntersectsObstacle(m, p2, obstacles[i])) {
+                if (txSegmentIntersects(p1, m, obstacles[i]) || txSegmentIntersects(m, p2, obstacles[i])) {
                     hit++;
                 }
             }
@@ -288,7 +288,7 @@
            bases' firing ranges; if none exists, returns the best-effort route that crosses
            as few distinct obstacles as possible (then shortest among those). The caller should
            run validateAutoDriverPath() on the result to see whether it's actually fully safe. */
-        function computeAutoDriverPathOnce(A, B, corridorOverride) {
+        function txdComputePathOnce(A, B, corridorOverride) {
             var allObstacles = getAllForeignObstacles();
 
             /* only consider obstacles near the corridor, to keep the graph small. Margin
@@ -311,7 +311,7 @@
 
             console.log('Auto driver: ' + allObstacles.length + ' foreign base(s) total, ' + obstacles.length + ' relevant to this route.', obstacles);
 
-            if (obstacles.length === 0 || moveClearOfObstacles(A, B, obstacles)) {
+            if (obstacles.length === 0 || txMoveClear(A, B, obstacles)) {
                 console.log('Auto driver: direct line A->B is clear, no detour needed.');
                 return { path: [A, B], obstacles: obstacles, corridor: corridor };
             }
@@ -337,7 +337,7 @@
             var n = nodes.length;
             var adj = [];
             for (var i = 0; i < n; i++) adj.push([]);
-            /* Directed edges: moveClearOfObstacles(p1,p2) is NOT symmetric, since the bend
+            /* Directed edges: txMoveClear(p1,p2) is NOT symmetric, since the bend
                point depends on which end is the start. A->B can be safe while B->A is not
                (or vice versa), so each direction must be checked and weighted independently.
                Every edge is included; crossing obstacles adds a heavy penalty per obstacle
@@ -349,7 +349,7 @@
                     if (i === j) continue;
                     var dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
                     var dist = Math.sqrt(dx * dx + dy * dy);
-                    var hit = countObstaclesHit(nodes[i], nodes[j], obstacles);
+                    var hit = txCountObstaclesHit(nodes[i], nodes[j], obstacles);
                     adj[i].push({ to: j, w: dist + hit * OBSTACLE_PENALTY });
                 }
             }
@@ -388,14 +388,14 @@
             return { path: path, obstacles: obstacles, corridor: corridor };
         }
 
-        /* Wraps computeAutoDriverPathOnce with a retry: if the route it found strays outside
+        /* Wraps txdComputePathOnce with a retry: if the route it found strays outside
            the corridor that was used to decide which obstacles even mattered, obstacles near
            the actual route may never have been considered at all (not a math bug - they just
            weren't in the candidate set). Detect that by checking the found path's own bounding
            box against the corridor, and if it doesn't fit, widen the corridor to cover the
            route actually found and recompute once. */
         function computeAutoDriverPath(A, B) {
-            var result = computeAutoDriverPathOnce(A, B);
+            var result = txdComputePathOnce(A, B);
             var path = result.path, corridor = result.corridor;
 
             var pathMinX = Math.min.apply(null, path.map(function(p) { return p.x; }));
@@ -414,18 +414,18 @@
                     minY: Math.min(corridor.minY, pathMinY) - 100,
                     maxY: Math.max(corridor.maxY, pathMaxY) + 100
                 };
-                result = computeAutoDriverPathOnce(A, B, widenedCorridor);
+                result = txdComputePathOnce(A, B, widenedCorridor);
             }
 
-            lastAutoDriverObstacles = result.obstacles; /* kept for debug drawing */
+            txdLastObstacles = result.obstacles; /* kept for debug drawing */
             return result.path;
         }
 
         function validateAutoDriverPath(path, obstacles) {
             var problems = [];
             for (var i = 0; i < path.length - 1; i++) {
-                if (!moveClearOfObstacles(path[i], path[i + 1], obstacles)) {
-                    problems.push({ from: path[i], to: path[i + 1], bend: computeBendPoint(path[i], path[i + 1]) });
+                if (!txMoveClear(path[i], path[i + 1], obstacles)) {
+                    problems.push({ from: path[i], to: path[i + 1], bend: txComputeBend(path[i], path[i + 1]) });
                 }
             }
             return problems;
@@ -438,8 +438,8 @@
                 ctx2.strokeStyle = 'red';
                 ctx2.fillStyle = 'red';
                 ctx2.lineWidth = 1;
-                for (var b = 0; b < lastAutoDriverObstacles.length; b++) {
-                    var o = lastAutoDriverObstacles[b];
+                for (var b = 0; b < txdLastObstacles.length; b++) {
+                    var o = txdLastObstacles[b];
                     var tl = dm.transMapToCtx2({ x: o.minX, y: o.minY });
                     var br = dm.transMapToCtx2({ x: o.maxX, y: o.maxY });
                     ctx2.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
@@ -450,7 +450,7 @@
                 ctx2.beginPath();
                 for (var i = 0; i < path.length - 1; i++) {
                     var p1 = path[i], p2 = path[i + 1];
-                    var bend = computeBendPoint(p1, p2);
+                    var bend = txComputeBend(p1, p2);
                     var cp1 = dm.transMapToCtx2(p1);
                     var cbend = dm.transMapToCtx2(bend);
                     var cp2 = dm.transMapToCtx2(p2);
@@ -503,10 +503,10 @@
                    The fleet may no longer be selected (deselecting alone doesn't cancel a run
                    anymore), so reselect it first - otherwise End would act on whatever happens
                    to be selected right now instead of the actual taxi-driving ships. */
-                if (autoDriverShipAcPositions && autoDriverShipAcPositions.length > 0) {
+                if (txdShipAcPositions && txdShipAcPositions.length > 0) {
                     acwLocal.shipSelect(0);
-                    for (var i = 0; i < autoDriverShipAcPositions.length; i++) {
-                        acwLocal.shipSelect(autoDriverShipAcPositions[i], true);
+                    for (var i = 0; i < txdShipAcPositions.length; i++) {
+                        acwLocal.shipSelect(txdShipAcPositions[i], true);
                     }
                 }
                 acwLocal.eventBroker.emitKeyPress(35);
@@ -523,17 +523,17 @@
             if (!chk.checked) {
                 /* if a scout route is actually executing, stop it the same way Taxi Driver does */
                 if (autoDriverTimer) {
-                    if (autoDriverShipAcPositions && autoDriverShipAcPositions.length > 0) {
+                    if (txdShipAcPositions && txdShipAcPositions.length > 0) {
                         acwLocal.shipSelect(0);
-                        for (var i = 0; i < autoDriverShipAcPositions.length; i++) {
-                            acwLocal.shipSelect(autoDriverShipAcPositions[i], true);
+                        for (var i = 0; i < txdShipAcPositions.length; i++) {
+                            acwLocal.shipSelect(txdShipAcPositions[i], true);
                         }
                     }
                     acwLocal.eventBroker.emitKeyPress(35);
                     clearAutoDriver();
                 }
                 /* either way, abandon any in-progress planning (committed + pending segments) */
-                resetTaxiScoutPlanning();
+                txsResetPlanning();
             }
         }
 
@@ -542,24 +542,24 @@
            Auto Driver only issues a handful of waypoints total (unlike the follower's rapid
            attacks), so checking on every progress tick keeps the view synced throughout a
            long single leg instead of only at the sparse waypoint-issuance moments. */
-        var autoDriverLastSyncTime = 0;
-        var AUTO_DRIVER_SYNC_INTERVAL_MS = 5000;
+        var txdLastSyncTime = 0;
+        var TXD_SYNC_INTERVAL_MS = 5000;
 
-        function autoDriverSyncIfNeeded() {
+        function txdSyncIfNeeded() {
             if (acwLocal.apsync !== true) {
-                autoDriverLastSyncTime = 0; /* so it fires promptly again once re-enabled */
+                txdLastSyncTime = 0; /* so it fires promptly again once re-enabled */
                 return;
             }
             var now = Date.now();
-            if (now - autoDriverLastSyncTime < AUTO_DRIVER_SYNC_INTERVAL_MS) return;
-            autoDriverLastSyncTime = now;
-            var ship = (autoDriverShipAcPositions && autoDriverShipAcPositions.length > 0)
-                ? GAME_DATA.shipByPos[autoDriverShipAcPositions[0]] : null;
+            if (now - txdLastSyncTime < TXD_SYNC_INTERVAL_MS) return;
+            txdLastSyncTime = now;
+            var ship = (txdShipAcPositions && txdShipAcPositions.length > 0)
+                ? GAME_DATA.shipByPos[txdShipAcPositions[0]] : null;
             var pos = ship ? { x: ship.x, y: ship.y }
-                : (autoDriverWaypoints ? autoDriverWaypoints[autoDriverWaypointIdx] : null);
+                : (txdWaypoints ? txdWaypoints[txdWaypointIdx] : null);
             if (pos) {
                 centerViewOn(pos.x, pos.y);
-                jumpMainWindowTo(pos.x, pos.y);
+                txdJumpMainWindow(pos.x, pos.y);
             }
         }
 
@@ -569,11 +569,11 @@
            would move THAT fleet instead of the taxi-driving one. So: save whatever is currently
            selected, reselect the taxi-driving fleet, issue the move, then restore the user's
            own selection - leaving their manual fleet management completely undisturbed. */
-        function autoDriverIssueMove(target) {
+        function txdIssueMove(target) {
             var previousSelection = getSelectedShipAcPositions();
             acwLocal.shipSelect(0);
-            for (var i = 0; i < autoDriverShipAcPositions.length; i++) {
-                acwLocal.shipSelect(autoDriverShipAcPositions[i], true);
+            for (var i = 0; i < txdShipAcPositions.length; i++) {
+                acwLocal.shipSelect(txdShipAcPositions[i], true);
             }
             acwLocal.shipMove(target.x, target.y);
             acwLocal.shipSelect(0);
@@ -588,15 +588,15 @@
         function snapshotAndStopAutoDriver() {
             if (!autoDriverTimer) return null;
             var snapshot = {
-                waypoints: autoDriverWaypoints,
-                waypointIdx: autoDriverWaypointIdx,
-                shipAcPositions: autoDriverShipAcPositions,
+                waypoints: txdWaypoints,
+                waypointIdx: txdWaypointIdx,
+                shipAcPositions: txdShipAcPositions,
                 displayPath: autoDriverDisplayPath,
-                acceptedProblems: autoDriverAcceptedProblems
+                acceptedProblems: txdAcceptedProblems
             };
             acwLocal.shipSelect(0);
-            for (var i = 0; i < autoDriverShipAcPositions.length; i++) {
-                acwLocal.shipSelect(autoDriverShipAcPositions[i], true);
+            for (var i = 0; i < txdShipAcPositions.length; i++) {
+                acwLocal.shipSelect(txdShipAcPositions[i], true);
             }
             acwLocal.eventBroker.emitKeyPress(35); /* actually stop the ships, same as End */
             clearAutoDriver();
@@ -605,22 +605,22 @@
 
         function resumeAutoDriver(snapshot) {
             clearAutoDriver();
-            autoDriverWaypoints = snapshot.waypoints;
-            autoDriverWaypointIdx = snapshot.waypointIdx;
-            autoDriverShipAcPositions = snapshot.shipAcPositions;
+            txdWaypoints = snapshot.waypoints;
+            txdWaypointIdx = snapshot.waypointIdx;
+            txdShipAcPositions = snapshot.shipAcPositions;
             autoDriverDisplayPath = snapshot.displayPath;
-            autoDriverAcceptedProblems = snapshot.acceptedProblems || [];
+            txdAcceptedProblems = snapshot.acceptedProblems || [];
             /* the fleet begins a fresh leg from wherever it actually is right now (post-stop),
                not from wherever it was heading from before the interruption */
-            var resumeShip = GAME_DATA.shipByPos[autoDriverShipAcPositions[0]];
-            autoDriverCurrentLegStart = resumeShip ? { x: resumeShip.x, y: resumeShip.y } : autoDriverWaypoints[autoDriverWaypointIdx];
-            autoDriverIssueMove(autoDriverWaypoints[autoDriverWaypointIdx]);
-            autoDriverLastSyncTime = Date.now();
-            autoDriverTimer = setInterval(checkAutoDriverProgress, 1000);
+            var resumeShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
+            txdLegStart = resumeShip ? { x: resumeShip.x, y: resumeShip.y } : txdWaypoints[txdWaypointIdx];
+            txdIssueMove(txdWaypoints[txdWaypointIdx]);
+            txdLastSyncTime = Date.now();
+            autoDriverTimer = setInterval(txdCheckProgress, 1000);
         }
 
         /* knownProblems: the unsafe legs (if any) the user already saw and accepted for this
-           exact path - so checkForNewlyRevealedObstacles doesn't re-flag them as "new" on every
+           exact path - so txdCheckNewObstacles doesn't re-flag them as "new" on every
            subsequent tick just because they're still there. Pass [] (or omit) for a fully safe path.
            segmentEndpoints: ordered list of "hard" waypoints a mid-flight recompute must treat as
            its local target instead of the very final destination - lets Taxi Scout's multi-segment
@@ -629,46 +629,46 @@
            whole path), matching plain Taxi Driver's existing behavior. */
         function executeAutoDriver(path, knownProblems, segmentEndpoints) {
             clearAutoDriver();
-            autoDriverCurrentLegStart = path[0];
-            autoDriverWaypoints = path.slice(1); /* exclude start A */
-            autoDriverWaypointIdx = 0;
-            autoDriverShipAcPositions = getSelectedShipAcPositions();
+            txdLegStart = path[0];
+            txdWaypoints = path.slice(1); /* exclude start A */
+            txdWaypointIdx = 0;
+            txdShipAcPositions = getSelectedShipAcPositions();
             autoDriverDisplayPath = path; /* keep drawn until aborted or point B reached */
-            autoDriverAcceptedProblems = knownProblems || [];
-            autoDriverSegmentEndpoints = segmentEndpoints || [path[path.length - 1]];
-            autoDriverIssueMove(autoDriverWaypoints[0]);
+            txdAcceptedProblems = knownProblems || [];
+            txdSegmentEndpoints = segmentEndpoints || [path[path.length - 1]];
+            txdIssueMove(txdWaypoints[0]);
             /* start the sync clock now, but don't jump immediately - let the user keep
                watching the just-confirmed route; the first sync happens after a full
-               interval has actually elapsed, via checkAutoDriverProgress's regular tick */
-            autoDriverLastSyncTime = Date.now();
-            autoDriverTimer = setInterval(checkAutoDriverProgress, 1000);
+               interval has actually elapsed, via txdCheckProgress's regular tick */
+            txdLastSyncTime = Date.now();
+            autoDriverTimer = setInterval(txdCheckProgress, 1000);
         }
 
-        var autoDriverSegmentEndpoints = []; /* ordered "hard" waypoints for mid-flight recompute targeting - see executeAutoDriver */
+        var txdSegmentEndpoints = []; /* ordered "hard" waypoints for mid-flight recompute targeting - see executeAutoDriver */
 
         /* Finds where the fleet currently is within the planned segment structure: walks forward
            from the current waypoint looking for the next point that matches one of
-           autoDriverSegmentEndpoints. Returns { target, remainderIndex } where target is that
-           segment's endpoint and remainderIndex is its position in autoDriverWaypoints (so
+           txdSegmentEndpoints. Returns { target, remainderIndex } where target is that
+           segment's endpoint and remainderIndex is its position in txdWaypoints (so
            whatever comes after it - later segments - can be preserved unchanged). Falls back to
            the very last waypoint if nothing matches (shouldn't normally happen). */
-        function findCurrentSegmentTarget() {
-            for (var i = autoDriverWaypointIdx; i < autoDriverWaypoints.length; i++) {
-                var wp = autoDriverWaypoints[i];
-                for (var j = 0; j < autoDriverSegmentEndpoints.length; j++) {
-                    var se = autoDriverSegmentEndpoints[j];
+        function txdFindSegmentTarget() {
+            for (var i = txdWaypointIdx; i < txdWaypoints.length; i++) {
+                var wp = txdWaypoints[i];
+                for (var j = 0; j < txdSegmentEndpoints.length; j++) {
+                    var se = txdSegmentEndpoints[j];
                     if (Math.abs(wp.x - se.x) < 0.01 && Math.abs(wp.y - se.y) < 0.01) {
                         return { target: wp, remainderIndex: i };
                     }
                 }
             }
-            var lastIdx = autoDriverWaypoints.length - 1;
-            return { target: autoDriverWaypoints[lastIdx], remainderIndex: lastIdx };
+            var lastIdx = txdWaypoints.length - 1;
+            return { target: txdWaypoints[lastIdx], remainderIndex: lastIdx };
         }
 
-        var autoDriverAcceptedProblems = []; /* unsafe legs the user has already seen and accepted for the current path */
-        var autoDriverRecomputing = false; /* guards against overlapping recompute attempts */
-        var autoDriverGeneration = 0; /* incremented by clearAutoDriver(); lets a stale async recompute detect it's been superseded */
+        var txdAcceptedProblems = []; /* unsafe legs the user has already seen and accepted for the current path */
+        var txdRecomputing = false; /* guards against overlapping recompute attempts */
+        var txdGeneration = 0; /* incremented by clearAutoDriver(); lets a stale async recompute detect it's been superseded */
 
         /* Checks whether the REMAINING part of the route (from the fleet's current actual
            position through all not-yet-reached waypoints) is still clear of every currently
@@ -677,9 +677,9 @@
            right on a leg that looked clear at the time. Returns true if a problem was found
            (and handled: fleet stopped, route recomputed, and either auto-resumed if the new
            route is fully safe, or the user asked whether to proceed anyway). */
-        function isAlreadyAcceptedLeg(toPoint) {
-            for (var i = 0; i < autoDriverAcceptedProblems.length; i++) {
-                var p = autoDriverAcceptedProblems[i].to;
+        function txIsAcceptedLeg(toPoint) {
+            for (var i = 0; i < txdAcceptedProblems.length; i++) {
+                var p = txdAcceptedProblems[i].to;
                 if (p.x === toPoint.x && p.y === toPoint.y) return true;
             }
             return false;
@@ -702,7 +702,7 @@
             for (var i = 0; i < attacks.length; i++) {
                 var attacker = GAME_DATA.shipByPos[attacks[i].from];
                 if (!attacker || acw.isInMyAlliance(attacker)) continue; /* only foreign attackers are a threat - matches the existing arrow-color logic just below, which uses this same method rather than isMyAlli(alliName) */
-                var r = FOREIGN_SHIP_SAFE_DISTANCE;
+                var r = TX_SHIP_SAFE_DIST;
                 var box = { minX: attacker.x - r, maxX: attacker.x + r, minY: attacker.y - r, maxY: attacker.y + r };
                 var alreadyKnown = false;
                 for (var k = 0; k < autoDriverKnownStealthObstacles.length; k++) {
@@ -715,16 +715,16 @@
             autoDriverKnownStealthObstacles = autoDriverKnownStealthObstacles.concat(newlyRemembered);
             console.log('Taxi driver: ' + newlyRemembered.length + ' stealth ship(s) revealed while shooting - remembered until the map changes.', newlyRemembered);
 
-            if (!autoDriverTimer || autoDriverRecomputing) return; /* nothing actively running, or already handling something else */
+            if (!autoDriverTimer || txdRecomputing) return; /* nothing actively running, or already handling something else */
 
-            var firstShip = GAME_DATA.shipByPos[autoDriverShipAcPositions[0]];
+            var firstShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
             if (!firstShip) return;
             var currentPos = { x: firstShip.x, y: firstShip.y };
-            var remainingPath = [currentPos].concat(autoDriverWaypoints.slice(autoDriverWaypointIdx));
+            var remainingPath = [currentPos].concat(txdWaypoints.slice(txdWaypointIdx));
             var stillClear = true;
             for (var i = 0; i < remainingPath.length - 1; i++) {
-                if (!moveClearOfObstacles(remainingPath[i], remainingPath[i + 1], newlyRemembered)) {
-                    if (isAlreadyAcceptedLeg(remainingPath[i + 1])) continue;
+                if (!txMoveClear(remainingPath[i], remainingPath[i + 1], newlyRemembered)) {
+                    if (txIsAcceptedLeg(remainingPath[i + 1])) continue;
                     stillClear = false;
                     break;
                 }
@@ -732,14 +732,14 @@
             if (stillClear) return; /* remembered for the future, but doesn't affect the current flight */
 
             console.log('Taxi driver: stealth ship attack blocks the current route - stopping, retreating, and recomputing.');
-            autoDriverRecomputing = true;
-            var segInfo = findCurrentSegmentTarget();
+            txdRecomputing = true;
+            var segInfo = txdFindSegmentTarget();
             var originalTarget = segInfo.target;
-            var remainderWaypoints = autoDriverWaypoints.slice(segInfo.remainderIndex + 1); /* later segments, left untouched */
-            var originalSegmentEndpoints = autoDriverSegmentEndpoints;
-            var shipAcPositions = autoDriverShipAcPositions;
-            var currentTarget = autoDriverWaypoints[autoDriverWaypointIdx];
-            var legStart = autoDriverCurrentLegStart; /* captured before clearAutoDriver wipes it below */
+            var remainderWaypoints = txdWaypoints.slice(segInfo.remainderIndex + 1); /* later segments, left untouched */
+            var originalSegmentEndpoints = txdSegmentEndpoints;
+            var shipAcPositions = txdShipAcPositions;
+            var currentTarget = txdWaypoints[txdWaypointIdx];
+            var legStart = txdLegStart; /* captured before clearAutoDriver wipes it below */
 
             /* stop the fleet right where it is, same mechanism as the manual End-key stop */
             acwLocal.shipSelect(0);
@@ -748,12 +748,12 @@
             }
             acwLocal.eventBroker.emitKeyPress(35);
             clearAutoDriver();
-            autoDriverShipAcPositions = shipAcPositions; /* clearAutoDriver wiped this - restore for the retreat below */
-            var myGeneration = autoDriverGeneration;
+            txdShipAcPositions = shipAcPositions; /* clearAutoDriver wiped this - restore for the retreat below */
+            var myGeneration = txdGeneration;
 
             /* Retreat 12 units back the way it came. The game flies each leg diagonally (45
                degrees) until one axis lines up, then straight the rest of the way (see
-               computeBendPoint) - it does NOT fly a straight line from wherever it currently is
+               txComputeBend) - it does NOT fly a straight line from wherever it currently is
                toward the target. So retreating "away from the target" in a straight line is only
                correct once the fleet is past the bend; while still in the diagonal portion, that
                vector points in the wrong direction entirely. Determine which portion the fleet is
@@ -793,18 +793,18 @@
             redraw();
             setTimeout(function() {
                 ensurePaintedThen(function() {
-                        if (myGeneration !== autoDriverGeneration) { autoDriverThinking = false; autoDriverRecomputing = false; return; }
-                        autoDriverShipAcPositions = shipAcPositions;
-                        autoDriverIssueMove(retreatPoint);
+                        if (myGeneration !== txdGeneration) { autoDriverThinking = false; txdRecomputing = false; return; }
+                        txdShipAcPositions = shipAcPositions;
+                        txdIssueMove(retreatPoint);
                         /* poll for arrival at the retreat point (or give up after ~5s and recompute
                            from wherever it actually is), then recompute the route from there */
                         var retreatCheckCount = 0;
                         var retreatTimer = setInterval(function() {
                             retreatCheckCount++;
-                            if (myGeneration !== autoDriverGeneration) {
+                            if (myGeneration !== txdGeneration) {
                                 clearInterval(retreatTimer);
                                 autoDriverThinking = false;
-                                autoDriverRecomputing = false;
+                                txdRecomputing = false;
                                 return;
                             }
                             var ship = GAME_DATA.shipByPos[shipAcPositions[0]];
@@ -821,34 +821,34 @@
                             var newPath = computeAutoDriverPath(newA, originalTarget).concat(remainderWaypoints);
                             var newProblems = validateAutoDriverPath(newPath, getAllForeignObstacles());
                             autoDriverThinking = false;
-                            if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
+                            if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
                             autoDriverDisplayPath = newPath;
                             autoDriverDisplayProblems = newProblems;
-                            autoDriverShipAcPositions = shipAcPositions;
+                            txdShipAcPositions = shipAcPositions;
                             redraw();
                             if (newProblems.length === 0) {
-                                autoDriverShipAcPositions = shipAcPositions;
+                                txdShipAcPositions = shipAcPositions;
                                 executeAutoDriver(newPath, newProblems, originalSegmentEndpoints);
-                                autoDriverRecomputing = false;
+                                txdRecomputing = false;
                             } else {
                                 ensurePaintedThen(function() {
-                                        if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
-                                        autoDriverShipAcPositions = shipAcPositions;
+                                        if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
+                                        txdShipAcPositions = shipAcPositions;
                                         drawAutoDriverPath(newPath, newProblems);
                                         showTaxiConfirmPanel(
                                             'A stealth ship revealed itself by shooting and blocks the planned route. The recalculated route is not fully safe \u2013 the unavoidable stretch(es) are shown in magenta. Resume anyway?',
                                             [
                                                 { label: 'Resume anyway', onClick: function() {
-                                                    if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
+                                                    if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
                                                     executeAutoDriver(newPath, newProblems, originalSegmentEndpoints);
-                                                    autoDriverRecomputing = false;
+                                                    txdRecomputing = false;
                                                 } },
                                                 { label: 'Abort', onClick: function() {
-                                                    if (myGeneration === autoDriverGeneration) {
+                                                    if (myGeneration === txdGeneration) {
                                                         autoDriverDisplayPath = null;
                                                         autoDriverDisplayProblems = [];
                                                     }
-                                                    autoDriverRecomputing = false;
+                                                    txdRecomputing = false;
                                                 } }
                                             ]
                                         );
@@ -859,20 +859,20 @@
             }, 1000);
         }
 
-        function checkForNewlyRevealedObstacles() {
-            if (autoDriverRecomputing) return true; /* already handling one, don't overlap */
-            var firstShip = GAME_DATA.shipByPos[autoDriverShipAcPositions[0]];
+        function txdCheckNewObstacles() {
+            if (txdRecomputing) return true; /* already handling one, don't overlap */
+            var firstShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
             if (!firstShip) return false; /* let the normal ship-lost handling deal with this */
             var currentPos = { x: firstShip.x, y: firstShip.y };
-            var remainingPath = [currentPos].concat(autoDriverWaypoints.slice(autoDriverWaypointIdx));
+            var remainingPath = [currentPos].concat(txdWaypoints.slice(txdWaypointIdx));
             /* Stealth ships are handled exclusively by checkForStealthShipAttacks() (which
                retreats 12 units before recomputing) - deliberately excluded here so the two
                functions don't race each other over the same obstacle with different reactions. */
-            var currentObstacles = getForeignBaseObstacles().concat(getForeignShipObstacles());
+            var currentObstacles = txGetBaseObstacles().concat(txGetShipObstacles());
             var stillClear = true;
             for (var i = 0; i < remainingPath.length - 1; i++) {
-                if (!moveClearOfObstacles(remainingPath[i], remainingPath[i + 1], currentObstacles)) {
-                    if (isAlreadyAcceptedLeg(remainingPath[i + 1])) {
+                if (!txMoveClear(remainingPath[i], remainingPath[i + 1], currentObstacles)) {
+                    if (txIsAcceptedLeg(remainingPath[i + 1])) {
                         continue; /* already known and accepted by the user before - not a new problem */
                     }
                     stillClear = false;
@@ -882,12 +882,12 @@
             if (stillClear) return false;
 
             console.log('Taxi driver: a newly revealed obstacle blocks the planned route - stopping and recomputing.');
-            autoDriverRecomputing = true;
-            var segInfo = findCurrentSegmentTarget();
+            txdRecomputing = true;
+            var segInfo = txdFindSegmentTarget();
             var originalTarget = segInfo.target;
-            var remainderWaypoints = autoDriverWaypoints.slice(segInfo.remainderIndex + 1); /* later segments, left untouched */
-            var originalSegmentEndpoints = autoDriverSegmentEndpoints;
-            var shipAcPositions = autoDriverShipAcPositions;
+            var remainderWaypoints = txdWaypoints.slice(segInfo.remainderIndex + 1); /* later segments, left untouched */
+            var originalSegmentEndpoints = txdSegmentEndpoints;
+            var shipAcPositions = txdShipAcPositions;
 
             /* stop the fleet right where it is, same mechanism as the manual End-key stop */
             acwLocal.shipSelect(0);
@@ -896,8 +896,8 @@
             }
             acwLocal.eventBroker.emitKeyPress(35);
             clearAutoDriver();
-            autoDriverShipAcPositions = shipAcPositions; /* clearAutoDriver wiped this - restore for the recompute below */
-            var myGeneration = autoDriverGeneration; /* captured AFTER our own clear; if this changes, something newer took over */
+            txdShipAcPositions = shipAcPositions; /* clearAutoDriver wiped this - restore for the recompute below */
+            var myGeneration = txdGeneration; /* captured AFTER our own clear; if this changes, something newer took over */
 
             autoDriverThinking = true;
             redraw();
@@ -906,43 +906,43 @@
                fleet's last moving position. Wait a real second before trusting it. */
             setTimeout(function() {
                 ensurePaintedThen(function() {
-                        if (myGeneration !== autoDriverGeneration) { autoDriverThinking = false; autoDriverRecomputing = false; return; }
+                        if (myGeneration !== txdGeneration) { autoDriverThinking = false; txdRecomputing = false; return; }
                         refreshGameData();
                         var freshShip = GAME_DATA.shipByPos[shipAcPositions[0]];
                         var newA = freshShip ? { x: freshShip.x, y: freshShip.y } : currentPos;
                         var newPath = computeAutoDriverPath(newA, originalTarget).concat(remainderWaypoints);
                         var newProblems = validateAutoDriverPath(newPath, getAllForeignObstacles());
                         autoDriverThinking = false;
-                        if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
+                        if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
                         autoDriverDisplayPath = newPath;
                         autoDriverDisplayProblems = newProblems;
-                        autoDriverShipAcPositions = shipAcPositions;
+                        txdShipAcPositions = shipAcPositions;
                         redraw();
                         if (newProblems.length === 0) {
                             /* fully safe - resume automatically, no need to bother the user */
-                            autoDriverShipAcPositions = shipAcPositions;
+                            txdShipAcPositions = shipAcPositions;
                             executeAutoDriver(newPath, newProblems, originalSegmentEndpoints);
-                            autoDriverRecomputing = false;
+                            txdRecomputing = false;
                         } else {
                             ensurePaintedThen(function() {
-                                    if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
-                                    autoDriverShipAcPositions = shipAcPositions;
+                                    if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
+                                    txdShipAcPositions = shipAcPositions;
                                     drawAutoDriverPath(newPath, newProblems);
                                     showTaxiConfirmPanel(
                                         'A foreign ship (or base) newly came into view and blocks the planned route. The recalculated route is not fully safe \u2013 the unavoidable stretch(es) are shown in magenta. Resume anyway?',
                                         [
                                             { label: 'Resume anyway', onClick: function() {
-                                                if (myGeneration !== autoDriverGeneration) { autoDriverRecomputing = false; return; }
+                                                if (myGeneration !== txdGeneration) { txdRecomputing = false; return; }
                                                 executeAutoDriver(newPath, newProblems, originalSegmentEndpoints);
-                                                autoDriverRecomputing = false;
+                                                txdRecomputing = false;
                                             } },
                                             { label: 'Abort', onClick: function() {
-                                                if (myGeneration === autoDriverGeneration) {
+                                                if (myGeneration === txdGeneration) {
                                                     autoDriverDisplayPath = null;
                                                     autoDriverDisplayProblems = [];
                                                     /* fleet stays stopped where it is */
                                                 }
-                                                autoDriverRecomputing = false;
+                                                txdRecomputing = false;
                                             } }
                                         ]
                                     );
@@ -953,19 +953,19 @@
             return true;
         }
 
-        function checkAutoDriverProgress() {
-            if (!autoDriverWaypoints || !autoDriverShipAcPositions || autoDriverShipAcPositions.length === 0) {
+        function txdCheckProgress() {
+            if (!txdWaypoints || !txdShipAcPositions || txdShipAcPositions.length === 0) {
                 clearAutoDriver();
                 return;
             }
-            if (checkForNewlyRevealedObstacles()) return;
-            autoDriverSyncIfNeeded();
-            var target = autoDriverWaypoints[autoDriverWaypointIdx];
+            if (txdCheckNewObstacles()) return;
+            txdSyncIfNeeded();
+            var target = txdWaypoints[txdWaypointIdx];
             var arrivalEpsilon = 0.5; /* map units - kept tight since routes hug obstacle corners exactly */
             var stillFlying = false;
             var anyShipFound = false;
-            for (var i = 0; i < autoDriverShipAcPositions.length; i++) {
-                var ship = GAME_DATA.shipByPos[autoDriverShipAcPositions[i]];
+            for (var i = 0; i < txdShipAcPositions.length; i++) {
+                var ship = GAME_DATA.shipByPos[txdShipAcPositions[i]];
                 if (!ship) continue; /* ship lost / merged / destroyed - ignore */
                 anyShipFound = true;
                 var dx = ship.x - target.x, dy = ship.y - target.y;
@@ -979,17 +979,17 @@
             }
             if (stillFlying) return; /* not there yet */
 
-            autoDriverWaypointIdx++;
-            if (autoDriverWaypointIdx >= autoDriverWaypoints.length) {
+            txdWaypointIdx++;
+            if (txdWaypointIdx >= txdWaypoints.length) {
                 clearAutoDriver(); /* reached final point B */
                 var chkScoutForArrival = document.getElementById('chkTaxiScout');
                 var arrivalLabel = (chkScoutForArrival && chkScoutForArrival.checked) ? 'Taxi scout' : 'Taxi driver';
                 alert(arrivalLabel + ': fleet has arrived at the target.');
                 return;
             }
-            var next = autoDriverWaypoints[autoDriverWaypointIdx];
-            autoDriverCurrentLegStart = target; /* the point just reached is where the next leg begins */
-            autoDriverIssueMove(next);
+            var next = txdWaypoints[txdWaypointIdx];
+            txdLegStart = target; /* the point just reached is where the next leg begins */
+            txdIssueMove(next);
         }
         /* -------------- end Auto Driver -------------- */
 
@@ -1000,31 +1000,31 @@
            (click -> show segment -> keep/change/execute/abort -> repeat) is new. */
 
         var taxiScoutCommittedPath = null;      /* accepted route so far, starting with the fleet's own position */
-        var taxiScoutCommittedProblems = [];    /* accumulated unsafe legs across all committed segments */
+        var txsCommittedProblems = [];    /* accumulated unsafe legs across all committed segments */
         var taxiScoutPendingPath = null;        /* the most recently computed segment, awaiting a decision */
-        var taxiScoutPendingProblems = [];
-        var taxiScoutShipAcPositions = null;    /* ships involved in this planning session */
-        var taxiScoutSegmentEndpoints = [];     /* ordered click-committed points (B, C, D, ...) - see executeAutoDriver's segmentEndpoints param */
+        var txsPendingProblems = [];
+        var txsShipAcPositions = null;    /* ships involved in this planning session */
+        var txsSegmentEndpoints = [];     /* ordered click-committed points (B, C, D, ...) - see executeAutoDriver's segmentEndpoints param */
 
-        function resetTaxiScoutPlanning() {
+        function txsResetPlanning() {
             taxiScoutCommittedPath = null;
-            taxiScoutCommittedProblems = [];
+            txsCommittedProblems = [];
             taxiScoutPendingPath = null;
-            taxiScoutPendingProblems = [];
-            taxiScoutShipAcPositions = null;
-            taxiScoutSegmentEndpoints = [];
-            dismissTaxiPanel();
+            txsPendingProblems = [];
+            txsShipAcPositions = null;
+            txsSegmentEndpoints = [];
+            txDismissPanel();
         }
 
-        function commitTaxiScoutPendingSegment() {
+        function txsCommitPending() {
             if (!taxiScoutPendingPath) return;
             /* drop the pending segment's first point - it's the same point already at the end
                of the committed path, so concatenating both directly would duplicate it */
             taxiScoutCommittedPath = taxiScoutCommittedPath.concat(taxiScoutPendingPath.slice(1));
-            taxiScoutCommittedProblems = taxiScoutCommittedProblems.concat(taxiScoutPendingProblems);
-            taxiScoutSegmentEndpoints = taxiScoutSegmentEndpoints.concat([taxiScoutPendingPath[taxiScoutPendingPath.length - 1]]);
+            txsCommittedProblems = txsCommittedProblems.concat(txsPendingProblems);
+            txsSegmentEndpoints = txsSegmentEndpoints.concat([taxiScoutPendingPath[taxiScoutPendingPath.length - 1]]);
             taxiScoutPendingPath = null;
-            taxiScoutPendingProblems = [];
+            txsPendingProblems = [];
         }
 
         /* Draws the whole in-progress plan: already-kept segments solid, the segment currently
@@ -1036,8 +1036,8 @@
                 ctx2.strokeStyle = 'red';
                 ctx2.fillStyle = 'red';
                 ctx2.lineWidth = 1;
-                for (var b = 0; b < lastAutoDriverObstacles.length; b++) {
-                    var o = lastAutoDriverObstacles[b];
+                for (var b = 0; b < txdLastObstacles.length; b++) {
+                    var o = txdLastObstacles[b];
                     var tl = dm.transMapToCtx2({ x: o.minX, y: o.minY });
                     var br = dm.transMapToCtx2({ x: o.maxX, y: o.maxY });
                     ctx2.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
@@ -1052,7 +1052,7 @@
                     ctx2.beginPath();
                     for (var i = 0; i < path.length - 1; i++) {
                         var p1 = path[i], p2 = path[i + 1];
-                        var bend = computeBendPoint(p1, p2);
+                        var bend = txComputeBend(p1, p2);
                         var cp1 = dm.transMapToCtx2(p1);
                         var cbend = dm.transMapToCtx2(bend);
                         var cp2 = dm.transMapToCtx2(p2);
@@ -1093,8 +1093,8 @@
 
                 drawSegment(taxiScoutCommittedPath, false);
                 drawSegment(taxiScoutPendingPath, true);
-                drawProblemSet(taxiScoutCommittedProblems, false);
-                drawProblemSet(taxiScoutPendingProblems, true);
+                drawProblemSet(txsCommittedProblems, false);
+                drawProblemSet(txsPendingProblems, true);
 
                 ctx2.restore();
             } catch (e) {
@@ -1115,9 +1115,9 @@
                 var ship = GAME_DATA.shipByPos[selAcPos[0]];
                 if (!ship) { console.log('Taxi scout: could not resolve ship position.'); return; }
                 startPoint = { x: ship.x, y: ship.y };
-                taxiScoutShipAcPositions = selAcPos;
+                txsShipAcPositions = selAcPos;
                 taxiScoutCommittedPath = [startPoint];
-                taxiScoutCommittedProblems = [];
+                txsCommittedProblems = [];
             }
 
             autoDriverThinking = true;
@@ -1127,7 +1127,7 @@
                 var segProblems = validateAutoDriverPath(segment, getAllForeignObstacles());
                 autoDriverThinking = false;
                 taxiScoutPendingPath = segment;
-                taxiScoutPendingProblems = segProblems;
+                txsPendingProblems = segProblems;
                 redraw();
                 ensurePaintedThen(function() {
                         drawTaxiScoutRoute();
@@ -1138,23 +1138,23 @@
                             'Segment shown on the map (dashed).' + unsafeNote + ' What would you like to do?',
                             [
                                 { label: 'Keep route', onClick: function() {
-                                    commitTaxiScoutPendingSegment();
+                                    txsCommitPending();
                                     drawTaxiScoutRoute();
                                     /* waits for the next click to extend the plan further */
                                 } },
                                 { label: 'Change route', onClick: function() {
                                     taxiScoutPendingPath = null;
-                                    taxiScoutPendingProblems = [];
+                                    txsPendingProblems = [];
                                     drawTaxiScoutRoute();
                                     /* waits for a new click, same starting point as before */
                                 } },
                                 { label: 'Execute', onClick: function() {
-                                    commitTaxiScoutPendingSegment();
+                                    txsCommitPending();
                                     var fullPath = taxiScoutCommittedPath;
-                                    var fullProblems = taxiScoutCommittedProblems;
-                                    var shipAcPositions = taxiScoutShipAcPositions;
-                                    var segmentEndpoints = taxiScoutSegmentEndpoints;
-                                    resetTaxiScoutPlanning();
+                                    var fullProblems = txsCommittedProblems;
+                                    var shipAcPositions = txsShipAcPositions;
+                                    var segmentEndpoints = txsSegmentEndpoints;
+                                    txsResetPlanning();
                                     /* reselect the planning fleet - executeAutoDriver reads the
                                        currently selected ships, which may have changed since
                                        planning started if the user looked at other fleets */
@@ -1165,7 +1165,7 @@
                                     executeAutoDriver(fullPath, fullProblems, segmentEndpoints);
                                 } },
                                 { label: 'Abort', onClick: function() {
-                                    resetTaxiScoutPlanning();
+                                    txsResetPlanning();
                                 } }
                             ]
                         );
