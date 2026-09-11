@@ -6,6 +6,8 @@
    canvasLib, taxionEnabled (set true by the loader after this executes).
    =================================================================== */
 
+        var TX_JS_VERSION = '2026-09-11-01'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
+
         /* Also scroll the main browser window to the same position, mirroring what the
            follower's own apsync counter does there (jumptoA(), per AstroBanan_v2_1_a15.js
            lines 3712-3718). That trigger only fires for the follower's own attack-mailbox
