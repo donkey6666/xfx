@@ -6,7 +6,7 @@
    canvasLib, taxionEnabled (set true by the loader after this executes).
    =================================================================== */
 
-        var TX_JS_VERSION = '2026-09-11-04'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
+        var TX_JS_VERSION = '2026-09-11-05'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
 
         /* Also scroll the main browser window to the same position, mirroring what the
            follower's own apsync counter does there (jumptoA(), per AstroBanan_v2_1_a15.js
@@ -328,12 +328,14 @@
             }
 
             /* visibility graph: A (node 0), B (node 1), corners of each relevant obstacle.
-               A small outward pad keeps waypoints clearly outside the obstacle box rather
-               than exactly on its boundary corner - landing precisely on the corner turned
-               out to be unsafe in practice (likely floating-point/precision sensitivity right
-               at the edge), even though flying along the boundary line itself was assumed
-               safe by design. */
-            var pad = 6;
+               No padding beyond the square itself - flying exactly on the boundary line of a
+               base's firing range is safe by design, and padding was tried and reverted:
+               confirmed with real data that it can push a waypoint straight into a THIRD,
+               previously unrelated obstacle's territory that the exact (unpadded) corner had
+               safely cleared. The original "landing on a corner looked unsafe" observation
+               that motivated padding turned out to be a missing-obstacle bug, fixed
+               separately (see the corridor-widening logic above), not a padding issue. */
+            var pad = 0;
             var nodes = [A, B];
             for (var i = 0; i < obstacles.length; i++) {
                 var o = obstacles[i];
