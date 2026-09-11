@@ -6,7 +6,7 @@
    canvasLib, taxionEnabled (set true by the loader after this executes).
    =================================================================== */
 
-        var TX_JS_VERSION = '2026-09-11-03'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
+        var TX_JS_VERSION = '2026-09-11-04'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
 
         /* Also scroll the main browser window to the same position, mirroring what the
            follower's own apsync counter does there (jumptoA(), per AstroBanan_v2_1_a15.js
@@ -434,20 +434,25 @@
            weren't in the candidate set). Detect that by checking the found path's own bounding
            box against the corridor, and if it doesn't fit, widen the corridor to cover the
            route actually found and recompute once. */
-        function computeAutoDriverPath(A, B) {
+        /* txdComputePathOnce + iterative widening, without the refinement pass below - used
+           both for the main route and for each refinement sub-call, so refining one leg can't
+           itself trigger further nested refinement (which caused a runaway, many-minutes-long
+           computation when tried recursively). */
+        function txdComputeWithWidening(A, B) {
             var result = txdComputePathOnce(A, B);
-            var path = result.path, corridor = result.corridor;
+            var MAX_WIDEN_ITERATIONS = 6;
+            for (var iteration = 0; iteration < MAX_WIDEN_ITERATIONS; iteration++) {
+                var path = result.path, corridor = result.corridor;
+                var pathMinX = Math.min.apply(null, path.map(function(p) { return p.x; }));
+                var pathMaxX = Math.max.apply(null, path.map(function(p) { return p.x; }));
+                var pathMinY = Math.min.apply(null, path.map(function(p) { return p.y; }));
+                var pathMaxY = Math.max.apply(null, path.map(function(p) { return p.y; }));
 
-            var pathMinX = Math.min.apply(null, path.map(function(p) { return p.x; }));
-            var pathMaxX = Math.max.apply(null, path.map(function(p) { return p.x; }));
-            var pathMinY = Math.min.apply(null, path.map(function(p) { return p.y; }));
-            var pathMaxY = Math.max.apply(null, path.map(function(p) { return p.y; }));
+                var strayed = pathMinX < corridor.minX || pathMaxX > corridor.maxX ||
+                              pathMinY < corridor.minY || pathMaxY > corridor.maxY;
+                if (!strayed) break;
 
-            var strayed = pathMinX < corridor.minX || pathMaxX > corridor.maxX ||
-                          pathMinY < corridor.minY || pathMaxY > corridor.maxY;
-
-            if (strayed) {
-                console.log('Auto driver: found route strayed outside the original corridor - widening and recomputing once.');
+                console.log('Auto driver: found route strayed outside the corridor (iteration ' + (iteration + 1) + ') - widening and recomputing.');
                 var widenedCorridor = {
                     minX: Math.min(corridor.minX, pathMinX) - 100,
                     maxX: Math.max(corridor.maxX, pathMaxX) + 100,
@@ -456,9 +461,81 @@
                 };
                 result = txdComputePathOnce(A, B, widenedCorridor);
             }
+            return result;
+        }
 
-            txdLastObstacles = result.obstacles; /* kept for debug drawing */
-            return result.path;
+        function computeAutoDriverPath(A, B) {
+            var result = txdComputeWithWidening(A, B);
+
+            /* Refine any remaining unsafe leg as its own smaller, localized sub-problem -
+               confirmed with real data that the SAME algorithm, given a much shorter A/B pair
+               (like a single Taxi Scout segment), finds a clean detour that the full route's
+               much larger corridor missed - the 120-unit grid spacing is coarse relative to a
+               huge corridor, but plenty fine relative to one short leg. This mirrors what
+               happens naturally when a Taxi Scout route is planned via several manual clicks
+               instead of one long automatic hop.
+
+               KNOWN LIMITATION: this only refines the ROUTE THE COARSE PASS ALREADY CHOSE - it
+               cannot make the coarse pass reconsider a fundamentally different overall
+               direction (e.g. going around a dense cluster to the south vs. the north), since
+               each leg's sub-computation just re-derives the best route between two already-
+               fixed points. Confirmed by testing that refining every leg (not just unsafe
+               ones) produces an identical result to refining only unsafe ones, for extra cost -
+               so only unsafe legs are refined here. Properly resolving that deeper limitation
+               would mean generating and refining multiple whole-route candidates and comparing
+               them, at a much higher computation cost; left as a possible future step.
+
+               Uses txdComputeWithWidening (not this function) for each sub-call, so refining a
+               leg can't itself trigger further nested refinement - a recursive version caused
+               an unbounded, many-minutes computation in testing. */
+            var finalPath = result.path;
+            var obstaclesSoFar = result.obstacles.slice();
+            var MAX_REFINE_PASSES = 4;
+            for (var refinePass = 0; refinePass < MAX_REFINE_PASSES; refinePass++) {
+                var problems = validateAutoDriverPath(finalPath, obstaclesSoFar);
+                if (problems.length === 0) break;
+
+                var refinedAny = false;
+                for (var p = 0; p < problems.length; p++) {
+                    var problem = problems[p];
+                    var legIdx = -1;
+                    for (var li = 0; li < finalPath.length - 1; li++) {
+                        if (finalPath[li].x === problem.from.x && finalPath[li].y === problem.from.y &&
+                            finalPath[li + 1].x === problem.to.x && finalPath[li + 1].y === problem.to.y) {
+                            legIdx = li;
+                            break;
+                        }
+                    }
+                    if (legIdx === -1) continue; /* already refined away by an earlier problem in this same pass */
+
+                    console.log('Auto driver: refining unsafe leg (' + problem.from.x + ',' + problem.from.y + ') -> (' + problem.to.x + ',' + problem.to.y + ') as its own localized sub-route.');
+                    var subResult = txdComputeWithWidening(problem.from, problem.to);
+                    var subPath = subResult.path;
+
+                    /* merge in any newly-seen obstacles from the sub-computation, by value
+                       (each call builds fresh obstacle objects, so reference equality won't
+                       dedupe) */
+                    for (var so = 0; so < subResult.obstacles.length; so++) {
+                        var cand = subResult.obstacles[so];
+                        var already = false;
+                        for (var eo = 0; eo < obstaclesSoFar.length; eo++) {
+                            var ex = obstaclesSoFar[eo];
+                            if (ex.minX === cand.minX && ex.maxX === cand.maxX && ex.minY === cand.minY && ex.maxY === cand.maxY) { already = true; break; }
+                        }
+                        if (!already) obstaclesSoFar.push(cand);
+                    }
+
+                    if (subPath.length > 2) {
+                        /* replace the single problem leg with the full refined sub-route */
+                        finalPath = finalPath.slice(0, legIdx).concat(subPath).concat(finalPath.slice(legIdx + 2));
+                        refinedAny = true;
+                    }
+                }
+                if (!refinedAny) break; /* nothing could be improved this pass - stop rather than loop pointlessly */
+            }
+
+            txdLastObstacles = obstaclesSoFar; /* kept for debug drawing */
+            return finalPath;
         }
 
         function validateAutoDriverPath(path, obstacles) {
