@@ -6,8 +6,6 @@
    canvasLib, taxionEnabled (set true by the loader after this executes).
    =================================================================== */
 
-        var TX_JS_VERSION = '2026-09-11-05'; /* bump whenever tx.js changes, to verify the loaded code's freshness */
-
         /* Also scroll the main browser window to the same position, mirroring what the
            follower's own apsync counter does there (jumptoA(), per AstroBanan_v2_1_a15.js
            lines 3712-3718). That trigger only fires for the follower's own attack-mailbox
@@ -1255,9 +1253,8 @@
                         var unsafeNote = segProblems.length > 0
                             ? ' It is not fully safe \u2013 the unavoidable dangerous stretch(es) are shown dashed in magenta.'
                             : '';
-                        var versionTag = (typeof TX_JS_VERSION !== 'undefined') ? (' [tx.js ' + TX_JS_VERSION + ']') : ' [tx.js version unknown]';
                         showTaxiConfirmPanel(
-                            'Segment shown on the map (dashed).' + unsafeNote + ' What would you like to do?' + versionTag,
+                            'Segment shown on the map (dashed).' + unsafeNote + ' What would you like to do?',
                             [
                                 { label: 'Keep route', onClick: function() {
                                     txsCommitPending();
@@ -1269,27 +1266,6 @@
                                     txsPendingProblems = [];
                                     drawTaxiScoutRoute();
                                     /* waits for a new click, same starting point as before */
-                                } },
-                                { label: 'Copy debug data', onClick: function() {
-                                    /* TEMPORARY - same purpose as the Taxi Driver debug export:
-                                       lets the exact start/target/obstacle data behind this
-                                       specific segment be saved out for offline analysis,
-                                       including raw GAME_DATA.bases (unfiltered) so a base
-                                       missing from the obstacle list can be diagnosed. */
-                                    var debugObstacles = (typeof txdLastObstacles !== 'undefined') ? txdLastObstacles : [];
-                                    var rawBases = (typeof GAME_DATA !== 'undefined' && GAME_DATA.bases) ? GAME_DATA.bases.map(function(b) {
-                                        return { x: b.x, y: b.y, alliName: b.alliName, spielerName: b.spielerName, schussweite: b.schussweite, baseInfo: b.baseData ? b.baseData.baseInfo : undefined };
-                                    }) : [];
-                                    var debugData = JSON.stringify({ A: startPoint, B: target, obstacles: debugObstacles, rawBases: rawBases }, null, 2);
-                                    var blob = new Blob([debugData], { type: 'application/json' });
-                                    var url = URL.createObjectURL(blob);
-                                    var a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = 'taxi_scout_debug_' + Date.now() + '.json';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    document.body.removeChild(a);
-                                    URL.revokeObjectURL(url);
                                 } },
                                 { label: 'Execute', onClick: function() {
                                     txsCommitPending();
