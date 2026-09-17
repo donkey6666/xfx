@@ -788,14 +788,12 @@
                         txdPausedForResume = false;
                         txdPauseSnapshot = null;
                         if (taxiUI) taxiUI.style.display = '';
-                        var cbDriver = document.getElementById('chkAutoDriver');
-                        if (cbDriver) cbDriver.checked = false;
-                        var cbScout = document.getElementById('chkTaxiScout');
-                        if (cbScout) cbScout.checked = false;
-                        var lblDriver = document.getElementById('lblAutoDriver');
-                        if (lblDriver) lblDriver.style.color = '';
-                        var lblScout = document.getElementById('lblTaxiScout');
-                        if (lblScout) lblScout.style.color = '';
+                        /* Checkbox state is deliberately left untouched - the mode that was
+                           active stays checked (ready for a new click to start a fresh route)
+                           and the other stays disabled to match, exactly as it was before the
+                           pause. Setting .checked programmatically wouldn't fire the onClick
+                           handler that keeps the two checkboxes' enabled state in sync anyway,
+                           so touching one without the other here would leave them mismatched. */
                         redraw();
                     } }
                 ],
