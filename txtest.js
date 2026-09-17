@@ -169,7 +169,7 @@
         function ensurePaintedThen(callback) {
             requestAnimationFrame(function() {
                 requestAnimationFrame(function() {
-                    setTimeout(callback, 300);
+                    setTimeout(callback, 600);
                 });
             });
         }
@@ -699,10 +699,11 @@
             }
         }
 
-        /* Snapshots the currently active run (if any) and actually stops the ships in-game
-           (same as End), so a redirect click can offer to resume exactly where it left off
-           instead of just abandoning the old plan. Returns null if nothing was running. */
-        function snapshotAndStopAutoDriver() {
+        /* Captures the currently active run's state (if any) and clears autoDriverTimer etc.,
+           WITHOUT sending any stop command itself - the caller is responsible for making sure
+           the ships are actually stopped, however that already happened. Returns null if
+           nothing was running. */
+        function snapshotAutoDriverState() {
             if (!autoDriverTimer) return null;
             var snapshot = {
                 waypoints: txdWaypoints,
@@ -711,12 +712,25 @@
                 displayPath: autoDriverDisplayPath,
                 acceptedProblems: txdAcceptedProblems
             };
+            clearAutoDriver();
+            return snapshot;
+        }
+
+        /* Snapshots the currently active run (if any) and actively stops the ships in-game
+           (same as End), so a redirect click can offer to resume exactly where it left off
+           instead of just abandoning the old plan. The stop command is needed here because a
+           redirect click doesn't stop the ships on its own the way pressing End does. Returns
+           null if nothing was running. */
+        function snapshotAndStopAutoDriver() {
+            if (!autoDriverTimer) return null;
+            var shipsToStop = txdShipAcPositions;
+            var snapshot = snapshotAutoDriverState();
+            if (!snapshot) return null;
             acwLocal.shipSelect(0);
-            for (var i = 0; i < txdShipAcPositions.length; i++) {
-                acwLocal.shipSelect(txdShipAcPositions[i], true);
+            for (var i = 0; i < shipsToStop.length; i++) {
+                acwLocal.shipSelect(shipsToStop[i], true);
             }
             acwLocal.eventBroker.emitKeyPress(35); /* actually stop the ships, same as End */
-            clearAutoDriver();
             return snapshot;
         }
 
@@ -734,6 +748,58 @@
             txdIssueMove(txdWaypoints[txdWaypointIdx]);
             txdLastSyncTime = Date.now();
             autoDriverTimer = setInterval(txdCheckProgress, 1000);
+        }
+
+        /* Pausing (End key) vs aborting (the confirm panel's own Abort choice): pressing End
+           during an active run - either Taxi Driver or Taxi Scout, both run through the same
+           autoDriverTimer once executing - already stops the fleet by itself (native End
+           behavior), so this only captures/clears our own tracking (snapshotAutoDriverState,
+           not snapshotAndStopAutoDriver - no redundant second stop command needed) and offers
+           to resume instead of discarding the whole plan. While paused, the route/headers/
+           checkboxes are hidden so the user can freely reposition ships (e.g. for a
+           screenshot) without that being mistaken for a redirect click - clearing
+           autoDriverTimer is exactly the condition the click handler checks before treating a
+           click as "redirect the active run", so an ordinary move click during the pause
+           behaves like any other normal click. Resuming continues from wherever the ships
+           actually are then, not from the position at the moment End was pressed. */
+        var txdPausedForResume = false;
+        var txdPauseSnapshot = null;
+
+        function pauseAutoDriverForResume() {
+            var snapshot = snapshotAutoDriverState();
+            if (!snapshot) return; /* nothing was actually running */
+            txdPauseSnapshot = snapshot;
+            txdPausedForResume = true;
+            var taxiUI = document.getElementById('taxiDriverUI');
+            if (taxiUI) taxiUI.style.display = 'none';
+            redraw();
+            showTaxiConfirmPanel(
+                'Movement paused. Resume or abort?',
+                [
+                    { label: 'Resume', onClick: function() {
+                        txdPausedForResume = false;
+                        if (taxiUI) taxiUI.style.display = '';
+                        var snap = txdPauseSnapshot;
+                        txdPauseSnapshot = null;
+                        resumeAutoDriver(snap);
+                        redraw();
+                    } },
+                    { label: 'Abort', onClick: function() {
+                        txdPausedForResume = false;
+                        txdPauseSnapshot = null;
+                        if (taxiUI) taxiUI.style.display = '';
+                        var cbDriver = document.getElementById('chkAutoDriver');
+                        if (cbDriver) cbDriver.checked = false;
+                        var cbScout = document.getElementById('chkTaxiScout');
+                        if (cbScout) cbScout.checked = false;
+                        var lblDriver = document.getElementById('lblAutoDriver');
+                        if (lblDriver) lblDriver.style.color = '';
+                        var lblScout = document.getElementById('lblTaxiScout');
+                        if (lblScout) lblScout.style.color = '';
+                        redraw();
+                    } }
+                ]
+            );
         }
 
         /* knownProblems: the unsafe legs (if any) the user already saw and accepted for this
@@ -815,6 +881,7 @@
         function checkForStealthShipAttacks() {
             var attacks = GAME_DATA.activeAttacks;
             if (!attacks || attacks.length === 0) return;
+            if (!GAME_DATA.shipByPos) return; /* older popup's refreshGameData() may not populate this field */
             var newlyRemembered = [];
             for (var i = 0; i < attacks.length; i++) {
                 var attacker = GAME_DATA.shipByPos[attacks[i].from];
@@ -833,6 +900,7 @@
             console.log('Taxi driver: ' + newlyRemembered.length + ' stealth ship(s) revealed while shooting - remembered until the map changes.', newlyRemembered);
 
             if (!autoDriverTimer || txdRecomputing) return; /* nothing actively running, or already handling something else */
+            if (!txdShipAcPositions || txdShipAcPositions.length === 0) return; /* run was cleared concurrently - nothing to recompute for */
 
             var firstShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
             if (!firstShip) return;
