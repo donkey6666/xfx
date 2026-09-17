@@ -195,14 +195,14 @@
 
         /* buttons: array of { label, onClick }. Clicking any button dismisses the panel first,
            then runs its callback. */
-        function showTaxiConfirmPanel(message, buttons) {
+        function showTaxiConfirmPanel(message, buttons, headerText) {
             txDismissPanel();
             var panel = document.createElement('div');
             panel.className = 'taxiConfirmPanel';
 
             var header = document.createElement('div');
             header.className = 'taxiConfirmHeader';
-            header.textContent = 'Taxi Driver';
+            header.textContent = headerText || 'Taxi Driver';
             panel.appendChild(header);
 
             var msgDiv = document.createElement('div');
@@ -798,7 +798,8 @@
                         if (lblScout) lblScout.style.color = '';
                         redraw();
                     } }
-                ]
+                ],
+                'Movement'
             );
         }
 
