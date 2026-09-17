@@ -742,12 +742,15 @@
             txdWaypoints = snapshot.waypoints;
             txdWaypointIdx = snapshot.waypointIdx;
             txdShipAcPositions = snapshot.shipAcPositions;
-            autoDriverDisplayPath = snapshot.displayPath;
             txdAcceptedProblems = snapshot.acceptedProblems || [];
             /* the fleet begins a fresh leg from wherever it actually is right now (post-stop),
-               not from wherever it was heading from before the interruption */
+               not from wherever it was heading from before the interruption - and the drawn
+               route should reflect that same actual starting point too, not the stored
+               snapshot's path (which still starts from the position at pause time). */
             var resumeShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
-            txdLegStart = resumeShip ? { x: resumeShip.x, y: resumeShip.y } : txdWaypoints[txdWaypointIdx];
+            var resumePos = resumeShip ? { x: resumeShip.x, y: resumeShip.y } : null;
+            txdLegStart = resumePos || txdWaypoints[txdWaypointIdx];
+            autoDriverDisplayPath = resumePos ? [resumePos].concat(txdWaypoints.slice(txdWaypointIdx)) : snapshot.displayPath;
             txdIssueMove(txdWaypoints[txdWaypointIdx]);
             txdLastSyncTime = Date.now();
             autoDriverTimer = setInterval(txdCheckProgress, 1000);
