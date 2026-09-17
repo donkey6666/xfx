@@ -705,12 +705,15 @@
            nothing was running. */
         function snapshotAutoDriverState() {
             if (!autoDriverTimer) return null;
+            var posShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
             var snapshot = {
                 waypoints: txdWaypoints,
                 waypointIdx: txdWaypointIdx,
                 shipAcPositions: txdShipAcPositions,
                 displayPath: autoDriverDisplayPath,
-                acceptedProblems: txdAcceptedProblems
+                acceptedProblems: txdAcceptedProblems,
+                segmentEndpoints: txdSegmentEndpoints,
+                positionAtSnapshot: posShip ? { x: posShip.x, y: posShip.y } : null
             };
             clearAutoDriver();
             return snapshot;
@@ -765,6 +768,80 @@
         var txdPausedForResume = false;
         var txdPauseSnapshot = null;
 
+        /* Resumes after a pause, first checking whether the fleet was repositioned in the
+           meantime (e.g. the user moved the ships with a click to line up a screenshot) - if
+           not, this is just the plain resume. If it was, the leg to the next waypoint might no
+           longer be safe (or might now be avoidably unsafe when it wasn't before), so that one
+           leg gets recomputed from wherever the fleet actually is, same pattern as
+           txdCheckNewObstacles: auto-continue if the recomputed leg is fully clear, otherwise
+           ask before proceeding. */
+        function resumeAfterPauseCheckingReposition(snap) {
+            var currentShip = GAME_DATA.shipByPos[snap.shipAcPositions[0]];
+            var currentPos = currentShip ? { x: currentShip.x, y: currentShip.y } : null;
+            var wasRepositioned = currentPos && snap.positionAtSnapshot &&
+                (Math.abs(currentPos.x - snap.positionAtSnapshot.x) > 1 || Math.abs(currentPos.y - snap.positionAtSnapshot.y) > 1);
+
+            if (!wasRepositioned) {
+                resumeAutoDriver(snap);
+                redraw();
+                return;
+            }
+
+            var nextTarget = snap.waypoints[snap.waypointIdx];
+            var remainderWaypoints = snap.waypoints.slice(snap.waypointIdx + 1);
+            var currentObstacles = txGetBaseObstacles().concat(txGetShipObstacles());
+            if (txMoveClear(currentPos, nextTarget, currentObstacles)) {
+                /* still a clear line to the next waypoint from the new position - no need to
+                   reroute, just resume as normal */
+                resumeAutoDriver(snap);
+                redraw();
+                return;
+            }
+
+            console.log('Taxi driver: ships were repositioned during the pause and the next leg is no longer clear - recomputing.');
+            autoDriverThinking = true;
+            redraw();
+            ensurePaintedThen(function() {
+                    var newPath = computeAutoDriverPath(currentPos, nextTarget).concat(remainderWaypoints);
+                    var newProblems = validateAutoDriverPath(newPath, getAllForeignObstacles());
+                    autoDriverThinking = false;
+                    txdShipAcPositions = snap.shipAcPositions;
+                    autoDriverDisplayPath = newPath;
+                    autoDriverDisplayProblems = newProblems;
+                    redraw();
+                    if (newProblems.length === 0) {
+                        /* fully clear once rerouted - just continue, no need to ask */
+                        acwLocal.shipSelect(0);
+                        for (var s1 = 0; s1 < snap.shipAcPositions.length; s1++) {
+                            acwLocal.shipSelect(snap.shipAcPositions[s1], true);
+                        }
+                        executeAutoDriver(newPath, newProblems, snap.segmentEndpoints);
+                    } else {
+                        ensurePaintedThen(function() {
+                                drawAutoDriverPath(newPath, newProblems);
+                                showTaxiConfirmPanel(
+                                    'The recalculated route (after the reposition) is not fully safe \u2013 the unavoidable stretch(es) are shown in magenta. Resume anyway?',
+                                    [
+                                        { label: 'Resume anyway', onClick: function() {
+                                            acwLocal.shipSelect(0);
+                                            for (var s2 = 0; s2 < snap.shipAcPositions.length; s2++) {
+                                                acwLocal.shipSelect(snap.shipAcPositions[s2], true);
+                                            }
+                                            executeAutoDriver(newPath, newProblems, snap.segmentEndpoints);
+                                        } },
+                                        { label: 'Abort', onClick: function() {
+                                            autoDriverDisplayPath = null;
+                                            autoDriverDisplayProblems = [];
+                                            /* fleet stays stopped where it is */
+                                        } }
+                                    ],
+                                    'Movement'
+                                );
+                        });
+                    }
+            });
+        }
+
         function pauseAutoDriverForResume() {
             var snapshot = snapshotAutoDriverState();
             if (!snapshot) return; /* nothing was actually running */
@@ -781,8 +858,7 @@
                         if (taxiUI) taxiUI.style.display = '';
                         var snap = txdPauseSnapshot;
                         txdPauseSnapshot = null;
-                        resumeAutoDriver(snap);
-                        redraw();
+                        resumeAfterPauseCheckingReposition(snap);
                     } },
                     { label: 'Abort', onClick: function() {
                         txdPausedForResume = false;
