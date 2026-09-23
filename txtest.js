@@ -111,6 +111,13 @@
            threat at the same spot indefinitely as long as we're still on the same map. */
         var autoDriverKnownStealthObstacles = [];
 
+        /* Which foreign ships (by acPos) have already triggered a Taxi Scout screenshot pause,
+           so the same ship sitting in view doesn't retrigger one on every tick - only a truly
+           new sighting should. Same map-scoping rationale as autoDriverKnownStealthObstacles
+           (cleared on map change, see the popup's onMapChangedRecieved). */
+        var txsScreenshottedShips = [];
+        var TXS_SCREENSHOT_RADIUS = 150; /* map units - how close a newly-sighted foreign ship must be to the remaining route to trigger a pause */
+
         function getAllForeignObstacles() {
             return txGetBaseObstacles().concat(txGetShipObstacles()).concat(autoDriverKnownStealthObstacles);
         }
@@ -270,6 +277,46 @@
         function txMoveClear(p1, p2, obstacles) {
             var m = txComputeBend(p1, p2);
             return txSegmentClear(p1, m, obstacles) && txSegmentClear(m, p2, obstacles);
+        }
+
+        /* Shortest distance from point p to the line segment a-b. */
+        function txPointToSegmentDist(p, a, b) {
+            var dx = b.x - a.x, dy = b.y - a.y;
+            var lenSq = dx * dx + dy * dy;
+            if (lenSq < 1e-9) {
+                var ddx0 = p.x - a.x, ddy0 = p.y - a.y;
+                return Math.sqrt(ddx0 * ddx0 + ddy0 * ddy0);
+            }
+            var t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+            var projX = a.x + t * dx, projY = a.y + t * dy;
+            var ddx = p.x - projX, ddy = p.y - projY;
+            return Math.sqrt(ddx * ddx + ddy * ddy);
+        }
+
+        /* Shortest distance from p to one leg of the route (an L-shape, diagonal-then-straight
+           per txComputeBend, not a straight line from legFrom to legTo). */
+        function txDistToLeg(p, legFrom, legTo) {
+            var bend = txComputeBend(legFrom, legTo);
+            return Math.min(txPointToSegmentDist(p, legFrom, bend), txPointToSegmentDist(p, bend, legTo));
+        }
+
+        /* Shortest distance from p to any leg of a multi-point route. */
+        function txMinDistToRoute(p, routePoints) {
+            var minDist = Infinity;
+            for (var i = 0; i < routePoints.length - 1; i++) {
+                var d = txDistToLeg(p, routePoints[i], routePoints[i + 1]);
+                if (d < minDist) minDist = d;
+            }
+            return minDist;
+        }
+
+        /* Raw foreign ship positions (not obstacle boxes) - same alliance filter as
+           txGetShipObstacles, but keeping acPos so individual ships can be tracked. */
+        function txGetForeignShipsRaw() {
+            return GAME_DATA.ships
+                .filter(function(s) { return !acwLocal.isMyAlli(s.alliName); })
+                .map(function(s) { return { acPos: s.acPos, x: s.x, y: s.y }; });
         }
 
         /* How many distinct obstacles a move from p1 to p2 actually crosses (0 if fully clear).
@@ -637,7 +684,15 @@
             if (lbl) lbl.style.color = chk.checked ? 'red' : '';
             var chkDriver = document.getElementById('chkAutoDriver');
             if (chkDriver) chkDriver.disabled = chk.checked;
+            var chkScoutScreenshot = document.getElementById('chkTaxiScoutScreenshot');
+            if (chkScoutScreenshot) chkScoutScreenshot.disabled = !chk.checked;
             if (!chk.checked) {
+                /* the screenshot sub-option only ever makes sense while Taxi Scout itself is
+                   on - reset it too so it doesn't stay silently checked-but-disabled */
+                if (chkScoutScreenshot) chkScoutScreenshot.checked = false;
+                var lblScoutScreenshot = document.getElementById('lblTaxiScoutScreenshot');
+                if (lblScoutScreenshot) lblScoutScreenshot.style.color = '';
+                txsScreenshotOnSighting = false;
                 /* if a scout route is actually executing, stop it the same way Taxi Driver does */
                 if (autoDriverTimer) {
                     if (txdShipAcPositions && txdShipAcPositions.length > 0) {
@@ -652,6 +707,17 @@
                 /* either way, abandon any in-progress planning (committed + pending segments) */
                 txsResetPlanning();
             }
+        }
+
+        /* Mirrors onChkTaxiScoutClick's pattern - just tracks the user's own choice, since
+           activation is explicit (checking the box) even though the box is only enabled while
+           Taxi Scout itself is on. */
+        var txsScreenshotOnSighting = false;
+        function onChkTaxiScoutScreenshotClick(chk) {
+            if (!taxionEnabled) return;
+            var lbl = document.getElementById('lblTaxiScoutScreenshot');
+            if (lbl) lbl.style.color = chk.checked ? 'red' : '';
+            txsScreenshotOnSighting = chk.checked;
         }
 
         /* Own apsync timer for Auto Driver - independent from popupApsyncLastTime (used by the
@@ -1122,6 +1188,90 @@
             }, 1000);
         }
 
+        /* Taxi Scout's "TX scrsht" option: while executing, pause to screenshot whenever a
+           foreign ship not seen before comes within TXS_SCREENSHOT_RADIUS of the remaining
+           route - whether or not it actually blocks the route. This only documents the
+           sighting and resumes the SAME plan; if the ship also genuinely blocks the route,
+           that's left for txdCheckNewObstacles to detect and handle on its own on a later
+           tick (it already checks the same ship obstacles), so this doesn't duplicate that
+           recompute-and-confirm logic. */
+        function checkForNearbyShipsForScreenshot() {
+            if (!txsScreenshotOnSighting) return false;
+            if (!autoDriverTimer || txdRecomputing) return false;
+            if (!txdShipAcPositions || txdShipAcPositions.length === 0) return false;
+            if (!GAME_DATA.shipByPos || !GAME_DATA.ships) return false;
+
+            var firstShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
+            if (!firstShip) return false;
+            var currentPos = { x: firstShip.x, y: firstShip.y };
+            var remainingRoute = [currentPos].concat(txdWaypoints.slice(txdWaypointIdx));
+
+            var foreignShips = txGetForeignShipsRaw();
+            var newSightings = [];
+            for (var i = 0; i < foreignShips.length; i++) {
+                var ship = foreignShips[i];
+                if (txsScreenshottedShips.indexOf(ship.acPos) !== -1) continue; /* already handled */
+                if (txMinDistToRoute({ x: ship.x, y: ship.y }, remainingRoute) > TXS_SCREENSHOT_RADIUS) continue;
+                newSightings.push(ship.acPos);
+            }
+            if (newSightings.length === 0) return false;
+
+            txsScreenshottedShips = txsScreenshottedShips.concat(newSightings);
+            console.log('Taxi driver: ' + newSightings.length + ' new foreign ship(s) sighted within ' + TXS_SCREENSHOT_RADIUS + ' units of the route - pausing for screenshot.');
+
+            txdRecomputing = true; /* reuse this guard so txdCheckNewObstacles/checkForStealthShipAttacks don't also jump in mid-screenshot */
+            var shipAcPositions = txdShipAcPositions;
+            var myGeneration = txdGeneration;
+
+            /* stop the fleet right where it is, same mechanism as the manual End-key stop */
+            acwLocal.shipSelect(0);
+            for (var s = 0; s < shipAcPositions.length; s++) {
+                acwLocal.shipSelect(shipAcPositions[s], true);
+            }
+            acwLocal.eventBroker.emitKeyPress(35);
+
+            /* reuse the same pause-display flag as the End-key pause, so the headers and
+               checkboxes hide via the exact same logic */
+            txdPausedForResume = true;
+            var taxiUI = document.getElementById('taxiDriverUI');
+            if (taxiUI) taxiUI.style.display = 'none';
+            redraw();
+
+            setTimeout(function() {
+                ensurePaintedThen(function() {
+                        if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                        refreshGameData();
+                        var freshShip = GAME_DATA.shipByPos[shipAcPositions[0]];
+                        var posForFilename = freshShip ? { x: freshShip.x, y: freshShip.y } : currentPos;
+                        var filename = 'map' + acwLocal.mapnr + '-x' + Math.round(posForFilename.x) + '-y' + Math.round(posForFilename.y) + '.png';
+                        if (typeof centerViewOn === 'function') centerViewOn(posForFilename.x, posForFilename.y);
+                        ensurePaintedThen(function() {
+                            if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                            var screenshotPromise = (typeof takeScreenshot === 'function') ? takeScreenshot(filename) : Promise.resolve();
+                            screenshotPromise.catch(function(err) { console.error('Taxi driver: screenshot failed', err); }).then(function() {
+                                if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                                txdPausedForResume = false;
+                                if (taxiUI) taxiUI.style.display = '';
+
+                                /* resume the exact same plan from wherever the fleet actually is now */
+                                var resumePos = freshShip ? { x: freshShip.x, y: freshShip.y } : null;
+                                txdLegStart = resumePos || txdWaypoints[txdWaypointIdx];
+                                autoDriverDisplayPath = resumePos ? [resumePos].concat(txdWaypoints.slice(txdWaypointIdx)) : autoDriverDisplayPath;
+                                txdShipAcPositions = shipAcPositions;
+                                redraw();
+                                txdIssueMove(txdWaypoints[txdWaypointIdx]);
+                                txdLastSyncTime = Date.now();
+                                autoDriverTimer = setInterval(txdCheckProgress, 1000);
+                                txdRecomputing = false;
+                            });
+                        });
+                });
+            }, 1000);
+
+            return true;
+        }
+
+
         function txdCheckNewObstacles() {
             if (txdRecomputing) return true; /* already handling one, don't overlap */
             var firstShip = GAME_DATA.shipByPos[txdShipAcPositions[0]];
@@ -1221,6 +1371,7 @@
                 clearAutoDriver();
                 return;
             }
+            if (checkForNearbyShipsForScreenshot()) return;
             if (txdCheckNewObstacles()) return;
             txdSyncIfNeeded();
             var target = txdWaypoints[txdWaypointIdx];
