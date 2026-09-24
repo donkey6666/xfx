@@ -1239,32 +1239,56 @@
 
             setTimeout(function() {
                 ensurePaintedThen(function() {
-                        if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
-                        refreshGameData();
-                        var freshShip = GAME_DATA.shipByPos[shipAcPositions[0]];
-                        var posForFilename = freshShip ? { x: freshShip.x, y: freshShip.y } : currentPos;
-                        var filename = 'map' + acwLocal.mapnr + '-x' + Math.round(posForFilename.x) + '-y' + Math.round(posForFilename.y) + '.png';
-                        if (typeof centerViewOn === 'function') centerViewOn(posForFilename.x, posForFilename.y);
-                        ensurePaintedThen(function() {
+                        try {
                             if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
-                            var screenshotPromise = (typeof takeScreenshot === 'function') ? takeScreenshot(filename) : Promise.resolve();
-                            screenshotPromise.catch(function(err) { console.error('Taxi driver: screenshot failed', err); }).then(function() {
-                                if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
-                                txdPausedForResume = false;
-                                if (taxiUI) taxiUI.style.display = '';
+                            refreshGameData();
+                            var freshShip = GAME_DATA.shipByPos[shipAcPositions[0]];
+                            var posForFilename = freshShip ? { x: freshShip.x, y: freshShip.y } : currentPos;
+                            var filename = 'map' + acwLocal.mapnr + '-x' + Math.round(posForFilename.x) + '-y' + Math.round(posForFilename.y) + '.png';
+                            if (typeof centerViewOn === 'function') centerViewOn(posForFilename.x, posForFilename.y);
+                            ensurePaintedThen(function() {
+                                try {
+                                    if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                                    var screenshotPromise = (typeof takeScreenshot === 'function') ? takeScreenshot(filename) : Promise.resolve();
+                                    screenshotPromise.catch(function(err) { console.error('Taxi driver: screenshot failed', err); }).then(function() {
+                                        try {
+                                            if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                                            txdPausedForResume = false;
+                                            if (taxiUI) taxiUI.style.display = '';
 
-                                /* resume the exact same plan from wherever the fleet actually is now */
-                                var resumePos = freshShip ? { x: freshShip.x, y: freshShip.y } : null;
-                                txdLegStart = resumePos || txdWaypoints[txdWaypointIdx];
-                                autoDriverDisplayPath = resumePos ? [resumePos].concat(txdWaypoints.slice(txdWaypointIdx)) : autoDriverDisplayPath;
-                                txdShipAcPositions = shipAcPositions;
-                                redraw();
-                                txdIssueMove(txdWaypoints[txdWaypointIdx]);
-                                txdLastSyncTime = Date.now();
-                                autoDriverTimer = setInterval(txdCheckProgress, 1000);
-                                txdRecomputing = false;
+                                            /* resume the exact same plan from wherever the fleet actually is now */
+                                            var resumePos = freshShip ? { x: freshShip.x, y: freshShip.y } : null;
+                                            txdLegStart = resumePos || txdWaypoints[txdWaypointIdx];
+                                            autoDriverDisplayPath = resumePos ? [resumePos].concat(txdWaypoints.slice(txdWaypointIdx)) : autoDriverDisplayPath;
+                                            txdShipAcPositions = shipAcPositions;
+                                            redraw();
+                                            txdIssueMove(txdWaypoints[txdWaypointIdx]);
+                                            txdLastSyncTime = Date.now();
+                                            autoDriverTimer = setInterval(txdCheckProgress, 1000);
+                                            txdRecomputing = false;
+                                        } catch (err) {
+                                            console.error('Taxi driver: resume-after-screenshot failed', err);
+                                            txdPausedForResume = false;
+                                            if (taxiUI) taxiUI.style.display = '';
+                                            txdRecomputing = false;
+                                            redraw();
+                                        }
+                                    });
+                                } catch (err) {
+                                    console.error('Taxi driver: screenshot step failed', err);
+                                    txdPausedForResume = false;
+                                    if (taxiUI) taxiUI.style.display = '';
+                                    txdRecomputing = false;
+                                    redraw();
+                                }
                             });
-                        });
+                        } catch (err) {
+                            console.error('Taxi driver: pre-screenshot step failed', err);
+                            txdPausedForResume = false;
+                            if (taxiUI) taxiUI.style.display = '';
+                            txdRecomputing = false;
+                            redraw();
+                        }
                 });
             }, 1000);
 
