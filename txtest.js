@@ -1223,6 +1223,12 @@
             var shipAcPositions = txdShipAcPositions;
             var myGeneration = txdGeneration;
 
+            /* Stop the recurring check entirely for the duration of the pause - it would
+               otherwise keep firing every second throughout the stop+wait+screenshot process
+               (which can take several seconds), and a fresh interval gets created at resume
+               time regardless, which would otherwise leave two intervals running in parallel. */
+            clearInterval(autoDriverTimer);
+
             /* stop the fleet right where it is, same mechanism as the manual End-key stop */
             acwLocal.shipSelect(0);
             for (var s = 0; s < shipAcPositions.length; s++) {
