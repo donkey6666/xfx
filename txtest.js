@@ -146,7 +146,8 @@
         var TXS_SCREENSHOT_RADIUS = 150; /* map units - how close a newly-sighted foreign ship must be to the remaining route to trigger a pause */
 
         function getAllForeignObstacles() {
-            return txGetBaseObstacles().concat(txGetShipObstacles()).concat(autoDriverKnownStealthObstacles);
+            var stealthRemembered = txsSpelokatMode ? [] : autoDriverKnownStealthObstacles;
+            return txGetBaseObstacles().concat(txGetShipObstacles()).concat(stealthRemembered);
         }
 
         function txPointInside(p, obstacles) {
