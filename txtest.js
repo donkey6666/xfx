@@ -1220,21 +1220,15 @@
             console.log('Taxi driver: ' + newSightings.length + ' new foreign ship(s) sighted within ' + TXS_SCREENSHOT_RADIUS + ' units of the route - pausing for screenshot.');
 
             txdRecomputing = true; /* reuse this guard so txdCheckNewObstacles/checkForStealthShipAttacks don't also jump in mid-screenshot */
-            var shipAcPositions = txdShipAcPositions;
+
+            /* Same proven stop+snapshot mechanism as the End-key pause: stops the fleet, and
+               (via clearAutoDriver internally) properly hides the drawn route/timer and bumps
+               txdGeneration - both needed here (a hand-rolled version of this previously left
+               the route visible in the screenshot, and never actually enabled the staleness
+               checks below since txdGeneration never changed). */
+            var snap = snapshotAndStopAutoDriver();
+            if (!snap) { txdRecomputing = false; return false; } /* shouldn't happen given the guards above, but be safe */
             var myGeneration = txdGeneration;
-
-            /* Stop the recurring check entirely for the duration of the pause - it would
-               otherwise keep firing every second throughout the stop+wait+screenshot process
-               (which can take several seconds), and a fresh interval gets created at resume
-               time regardless, which would otherwise leave two intervals running in parallel. */
-            clearInterval(autoDriverTimer);
-
-            /* stop the fleet right where it is, same mechanism as the manual End-key stop */
-            acwLocal.shipSelect(0);
-            for (var s = 0; s < shipAcPositions.length; s++) {
-                acwLocal.shipSelect(shipAcPositions[s], true);
-            }
-            acwLocal.eventBroker.emitKeyPress(35);
 
             /* reuse the same pause-display flag as the End-key pause, so the headers and
                checkboxes hide via the exact same logic */
@@ -1246,38 +1240,30 @@
             setTimeout(function() {
                 ensurePaintedThen(function() {
                         try {
-                            if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                            if (myGeneration !== txdGeneration) return; /* superseded (e.g. End key or a redirect click) - don't fight whatever took over */
                             refreshGameData();
-                            var freshShip = GAME_DATA.shipByPos[shipAcPositions[0]];
+                            var freshShip = GAME_DATA.shipByPos[snap.shipAcPositions[0]];
                             var posForFilename = freshShip ? { x: freshShip.x, y: freshShip.y } : currentPos;
                             var filename = 'map' + acwLocal.mapnr + '-x' + Math.round(posForFilename.x) + '-y' + Math.round(posForFilename.y) + '.png';
                             if (typeof centerViewOn === 'function') centerViewOn(posForFilename.x, posForFilename.y);
                             ensurePaintedThen(function() {
                                 try {
-                                    if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
+                                    if (myGeneration !== txdGeneration) return;
                                     var screenshotPromise = (typeof takeScreenshot === 'function') ? takeScreenshot(filename) : Promise.resolve();
                                     screenshotPromise.catch(function(err) { console.error('Taxi driver: screenshot failed', err); }).then(function() {
                                         try {
-                                            if (myGeneration !== txdGeneration) { txdPausedForResume = false; if (taxiUI) taxiUI.style.display = ''; txdRecomputing = false; return; }
                                             txdPausedForResume = false;
                                             if (taxiUI) taxiUI.style.display = '';
-
-                                            /* resume the exact same plan from wherever the fleet actually is now */
-                                            var resumePos = freshShip ? { x: freshShip.x, y: freshShip.y } : null;
-                                            txdLegStart = resumePos || txdWaypoints[txdWaypointIdx];
-                                            autoDriverDisplayPath = resumePos ? [resumePos].concat(txdWaypoints.slice(txdWaypointIdx)) : autoDriverDisplayPath;
-                                            txdShipAcPositions = shipAcPositions;
+                                            if (myGeneration !== txdGeneration) { redraw(); return; }
+                                            resumeAutoDriver(snap);
                                             redraw();
-                                            txdIssueMove(txdWaypoints[txdWaypointIdx]);
-                                            txdLastSyncTime = Date.now();
-                                            autoDriverTimer = setInterval(txdCheckProgress, 1000);
-                                            txdRecomputing = false;
                                         } catch (err) {
                                             console.error('Taxi driver: resume-after-screenshot failed', err);
                                             txdPausedForResume = false;
                                             if (taxiUI) taxiUI.style.display = '';
-                                            txdRecomputing = false;
                                             redraw();
+                                        } finally {
+                                            txdRecomputing = false;
                                         }
                                     });
                                 } catch (err) {
