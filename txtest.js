@@ -83,9 +83,31 @@
             txDismissPanel(); /* any pending decision is moot once the run it belonged to is cleared */
         }
 
+        /* Set at the start of each Taxi Scout segment computation (see handleTaxiScoutClick),
+           based on whether every currently selected ship is a Spelokat - re-evaluated on every
+           click, so switching to a different fleet between segments is picked up automatically.
+           Deliberately never touched by plain Taxi Driver. Spelokat is a stealth ship type, so
+           while flying it: a base without a detector can't see it (safe to fly through its
+           firing range), and a foreign ship can't either unless that ship's own type can
+           detect stealth (the same underlying flag that happens to single out the Avelabat and
+           Detector ship types). */
+        var txsSpelokatMode = false;
+
+        function txsCheckFlyingSpelokat(shipAcPositions) {
+            if (!shipAcPositions || shipAcPositions.length === 0) return false;
+            for (var i = 0; i < shipAcPositions.length; i++) {
+                var ship = GAME_DATA.shipByPos[shipAcPositions[i]];
+                if (!ship) return false;
+                var type = Math.floor(ship.baseInfo / 50);
+                if (!acwLocal.shipData[type] || acwLocal.shipData[type].name !== 'Spelokat') return false;
+            }
+            return true;
+        }
+
         function txGetBaseObstacles() {
             return GAME_DATA.bases
                 .filter(function(b) { return !acwLocal.isMyAlli(b.alliName); })
+                .filter(function(b) { return !(txsSpelokatMode && !b.hasDetector); })
                 .map(function(b) {
                     var r = (b.schussweite > 0) ? b.schussweite : 24; /* unknown range -> assume worst case */
                     return { minX: b.x - r, maxX: b.x + r, minY: b.y - r, maxY: b.y + r };
@@ -96,6 +118,11 @@
         function txGetShipObstacles() {
             return GAME_DATA.ships
                 .filter(function(s) { return !acwLocal.isMyAlli(s.alliName); })
+                .filter(function(s) {
+                    if (!txsSpelokatMode) return true;
+                    var type = Math.floor(s.baseInfo / 50);
+                    return acwLocal.shipData[type] && acwLocal.shipData[type].detector;
+                })
                 .map(function(s) {
                     var r = TX_SHIP_SAFE_DIST;
                     return { minX: s.x - r, maxX: s.x + r, minY: s.y - r, maxY: s.y + r };
@@ -1443,6 +1470,7 @@
             txsPendingProblems = [];
             txsShipAcPositions = null;
             txsSegmentEndpoints = [];
+            txsSpelokatMode = false;
             txDismissPanel();
         }
 
@@ -1549,6 +1577,7 @@
                 taxiScoutCommittedPath = [startPoint];
                 txsCommittedProblems = [];
             }
+            txsSpelokatMode = txsCheckFlyingSpelokat(txsShipAcPositions);
 
             autoDriverThinking = true;
             redraw();
