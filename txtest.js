@@ -83,23 +83,23 @@
             txDismissPanel(); /* any pending decision is moot once the run it belonged to is cleared */
         }
 
-        /* Set at the start of each Taxi Scout segment computation (see handleTaxiScoutClick),
-           based on whether every currently selected ship is a Spelokat - re-evaluated on every
-           click, so switching to a different fleet between segments is picked up automatically.
-           Deliberately never touched by plain Taxi Driver. Spelokat is a stealth ship type, so
-           while flying it: a base without a detector can't see it (safe to fly through its
-           firing range), and a foreign ship can't either unless that ship's own type can
-           detect stealth (the same underlying flag that happens to single out the Avelabat and
-           Detector ship types). */
-        var txsSpelokatMode = false;
+        /* Set at the start of each route computation (both Taxi Driver and Taxi Scout), based
+           on whether every currently selected ship is one of the stealth ship types below -
+           re-evaluated each time, so switching to a different fleet is picked up automatically.
+           While flying an all-stealth fleet: a base without a detector can't see it (safe to
+           fly through its firing range), and a foreign ship can't either unless that ship's own
+           type can detect stealth (the same underlying flag that happens to single out the
+           Avelabat and Detector ship types). */
+        var TX_STEALTH_FLEET_TYPES = ['Spelokat', 'Komeshede', 'Ampatoce', 'Tigorece', 'Tsenoc', 'Kobrole'];
+        var txStealthFleetMode = false;
 
-        function txsCheckFlyingSpelokat(shipAcPositions) {
+        function txCheckFlyingStealthFleet(shipAcPositions) {
             if (!shipAcPositions || shipAcPositions.length === 0) return false;
             for (var i = 0; i < shipAcPositions.length; i++) {
                 var ship = GAME_DATA.shipByPos[shipAcPositions[i]];
                 if (!ship) return false;
                 var type = Math.floor(ship.baseInfo / 50);
-                if (!acwLocal.shipData[type] || acwLocal.shipData[type].name !== 'Spelokat') return false;
+                if (!acwLocal.shipData[type] || TX_STEALTH_FLEET_TYPES.indexOf(acwLocal.shipData[type].name) === -1) return false;
             }
             return true;
         }
@@ -107,7 +107,7 @@
         function txGetBaseObstacles() {
             return GAME_DATA.bases
                 .filter(function(b) { return !acwLocal.isMyAlli(b.alliName); })
-                .filter(function(b) { return !(txsSpelokatMode && !b.hasDetector); })
+                .filter(function(b) { return !(txStealthFleetMode && !b.hasDetector); })
                 .map(function(b) {
                     var r = (b.schussweite > 0) ? b.schussweite : 24; /* unknown range -> assume worst case */
                     return { minX: b.x - r, maxX: b.x + r, minY: b.y - r, maxY: b.y + r };
@@ -119,7 +119,7 @@
             return GAME_DATA.ships
                 .filter(function(s) { return !acwLocal.isMyAlli(s.alliName); })
                 .filter(function(s) {
-                    if (!txsSpelokatMode) return true;
+                    if (!txStealthFleetMode) return true;
                     var type = Math.floor(s.baseInfo / 50);
                     return acwLocal.shipData[type] && acwLocal.shipData[type].detector;
                 })
@@ -146,7 +146,7 @@
         var TXS_SCREENSHOT_RADIUS = 150; /* map units - how close a newly-sighted foreign ship must be to the remaining route to trigger a pause */
 
         function getAllForeignObstacles() {
-            var stealthRemembered = txsSpelokatMode ? [] : autoDriverKnownStealthObstacles;
+            var stealthRemembered = txStealthFleetMode ? [] : autoDriverKnownStealthObstacles;
             return txGetBaseObstacles().concat(txGetShipObstacles()).concat(stealthRemembered);
         }
 
@@ -689,6 +689,9 @@
             if (lbl) lbl.style.color = chk.checked ? 'red' : '';
             var chkScout = document.getElementById('chkTaxiScout');
             if (chkScout) chkScout.disabled = chk.checked;
+            if (!chk.checked) {
+                txStealthFleetMode = false;
+            }
             if (!chk.checked && autoDriverTimer) {
                 /* Auto Driver was turned off while a run was in progress - actually stop the
                    ships in-game (same as pressing End), not just abandon our own tracking.
@@ -721,7 +724,7 @@
                 var lblScoutScreenshot = document.getElementById('lblTaxiScoutScreenshot');
                 if (lblScoutScreenshot) lblScoutScreenshot.style.color = '';
                 txsScreenshotOnSighting = false;
-                txsSpelokatMode = false;
+                txStealthFleetMode = false;
                 /* if a scout route is actually executing, stop it the same way Taxi Driver does */
                 if (autoDriverTimer) {
                     if (txdShipAcPositions && txdShipAcPositions.length > 0) {
@@ -1578,7 +1581,7 @@
                 taxiScoutCommittedPath = [startPoint];
                 txsCommittedProblems = [];
             }
-            txsSpelokatMode = txsCheckFlyingSpelokat(txsShipAcPositions);
+            txStealthFleetMode = txCheckFlyingStealthFleet(txsShipAcPositions);
 
             autoDriverThinking = true;
             redraw();
