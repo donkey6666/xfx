@@ -721,6 +721,7 @@
                 var lblScoutScreenshot = document.getElementById('lblTaxiScoutScreenshot');
                 if (lblScoutScreenshot) lblScoutScreenshot.style.color = '';
                 txsScreenshotOnSighting = false;
+                txsSpelokatMode = false;
                 /* if a scout route is actually executing, stop it the same way Taxi Driver does */
                 if (autoDriverTimer) {
                     if (txdShipAcPositions && txdShipAcPositions.length > 0) {
@@ -1471,7 +1472,6 @@
             txsPendingProblems = [];
             txsShipAcPositions = null;
             txsSegmentEndpoints = [];
-            txsSpelokatMode = false;
             txDismissPanel();
         }
 
